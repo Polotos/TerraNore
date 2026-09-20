@@ -1,6 +1,5 @@
 const api = '/api/test/v1';
 const fmt = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
-const months = ['ЯНВАРЬ','ФЕВРАЛЬ','МАРТ','АПРЕЛЬ','МАЙ','ИЮНЬ','ИЮЛЬ','АВГУСТ','СЕНТЯБРЬ','ОКТЯБРЬ','НОЯБРЬ','ДЕКАБРЬ'];
 let state = null;
 let selectedTicks = 12;
 let run = { active: false, paused: false, taskId: null, cancellationToken: null, startTick: 0, targetTick: 0, completed: 0, started: 0 };
@@ -45,20 +44,13 @@ async function request(path, options = {}) {
   return payload;
 }
 
-function worldDate(tick) {
-  const base = new Date(`${state?.world?.startDate || '2200-01-01'}T00:00:00Z`);
-  const month = base.getUTCMonth() + tick;
-  return { year: base.getUTCFullYear() + Math.floor(month / 12), month: ((month % 12) + 12) % 12 };
-}
-
 function renderState(data, force = false) {
   state = data;
   updateLodAvailability();
   const now = performance.now();
   if (!force && now - lastPaint < 125) return; // cap expensive DOM paints at 8 Hz
   lastPaint = now;
-  const date = worldDate(data.world.tick);
-  setText('#currentDate', `${date.year} · ${months[date.month]}`);
+  setText('#currentDate', data.world.currentDate);
   setText('#footerSeed', data.world.seed);
   setText('#saveFormat', data.saveFormat);
   setText('#objectPopulation', fmt.format(data.summary.population));

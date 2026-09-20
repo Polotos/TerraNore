@@ -32,7 +32,7 @@
         </div>
         <div class="form-card"><label for="systems">СИСТЕМЫ</label><input id="systems" type="number" min="1" max="10000" value="64"><small>Звёздных систем</small></div>
         <div class="form-card"><label for="settlements">ПОСЕЛЕНИЯ</label><input id="settlements" type="number" min="1" max="100000" value="320"><small>Начальных узлов</small></div>
-        <div class="form-card"><label for="startDate">НАЧАЛЬНАЯ ДАТА</label><input id="startDate" type="date" value="2200-01-01"></div>
+        <div class="form-card"><label for="startDate">НАЧАЛЬНАЯ ДАТА</label><input id="startDate" type="text" value="01.1\1.1.4300" pattern="[0-9]{1,2}\.[1-3]\\[1-3]\.[1-4]\.[0-9]+" title="день.декада\треть.квартал.год" required></div>
         <div class="form-card"><label for="accuracy">ПРОФИЛЬ ТОЧНОСТИ</label><select id="accuracy"><option value="fast">Быстрый</option><option value="balanced" selected>Сбалансированный</option><option value="research">Исследовательский</option></select></div>
         <div class="form-card"><label for="workers">РАБОЧИЕ ПОТОКИ</label><select id="workers"><option value="auto" selected>Автоматически</option><option>1</option><option>2</option><option>4</option><option>8</option></select><small id="cpuHint">Определяется системой</small></div>
         <div class="create-submit wide"><div><span>ОЦЕНКА МИРА</span><b id="worldEstimate">≈ 4 480 объектов</b></div><button class="primary large" type="submit"><span>＋</span> Создать тестовый мир</button></div>
@@ -52,7 +52,7 @@
         </article>
         <aside class="panel telemetry">
           <p class="eyebrow">ТЕЛЕМЕТРИЯ</p><h2>Прогресс расчёта</h2>
-          <div class="date-readout"><small>ТЕКУЩАЯ ДАТА</small><strong id="currentDate">2200 · ЯНВАРЬ</strong></div>
+          <div class="date-readout"><small>ТЕКУЩАЯ ДАТА</small><strong id="currentDate">01.1\1.1.4300</strong></div>
           <div class="progress-track"><i id="progressBar"></i></div><div class="progress-caption"><span id="progressLabel">0 / 0 тиков</span><b id="progressPercent">0%</b></div>
           <dl class="telemetry-grid"><div><dt>СКОРОСТЬ</dt><dd id="speed">0 <small>тиков/с</small></dd></div><div><dt>ОЧЕРЕДЬ ЗАДАЧ</dt><dd id="queue">0</dd></div><div><dt>WORKERS</dt><dd id="workerUsage">0 / —</dd></div><div><dt>ОСТАЛОСЬ</dt><dd id="eta">—</dd></div></dl>
           <div id="balanceWarning" class="warning" hidden><span>!</span><div><b>Предупреждение баланса</b><p>Обнаружено отклонение товарного баланса.</p></div></div>

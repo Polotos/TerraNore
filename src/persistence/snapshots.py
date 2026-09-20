@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.simulation.model import Economy, Region, World
+from src.simulation.model import Economy, Region, SimulationDate, World
 
 FORMAT = "test-save-v1"
 
@@ -18,10 +18,17 @@ def _world_from_dict(data: dict) -> World:
     regions = [Region(**{**region, "economy": Economy(**region["economy"])}) for region in data["regions"]]
     configuration = {
         key: data[key]
-        for key in ("system_count", "settlement_count", "start_date", "accuracy_profile")
+        for key in ("system_count", "settlement_count", "accuracy_profile")
         if key in data
     }
-    return World(seed=data["seed"], tick=data["tick"], regions=regions, **configuration)
+    initial = data.get("initial_date", data.get("start_date", "01.1\\1.1.4300"))
+    current = data.get("current_date")
+    world = World(seed=data["seed"], tick=data["tick"], regions=regions,
+                 initial_date=SimulationDate.parse(initial),
+                 current_date=SimulationDate.parse(current) if current else None,
+                 **configuration)
+    world._legacy_iso_date = "start_date" in data and "-" in data["start_date"]
+    return world
 
 
 def clone_world(world: World) -> World:

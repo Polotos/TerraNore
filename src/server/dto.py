@@ -33,6 +33,7 @@ class WorldDTO:
     system_count: int
     settlement_count: int
     start_date: str
+    current_date: str
     accuracy_profile: str
     workers: int
     regions: tuple[RegionDTO, ...]
@@ -45,6 +46,7 @@ class WorldDTO:
             world.system_count,
             world.settlement_count,
             world.start_date,
+            str(world.current_date),
             world.accuracy_profile,
             workers,
             tuple(
@@ -71,6 +73,7 @@ class WorldDTO:
         for snake, camel in (
             ("system_count", "systemCount"), ("settlement_count", "settlementCount"),
             ("start_date", "startDate"), ("accuracy_profile", "accuracyProfile"),
+            ("current_date", "currentDate"),
         ):
             result[camel] = result.pop(snake)
         return result
