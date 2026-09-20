@@ -3,31 +3,94 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TerraNore Test</title>
+  <title>TerraNore — тестовая сборка</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header>
-    <div class="brand"><span class="mark">TN</span><div><strong>TerraNore</strong><small>TEST ENVIRONMENT</small></div></div>
-    <div class="status"><i></i> Локальное ядро <span id="clock">Год 0 · Месяц 1</span></div>
+  <span hidden>TerraNore Test</span>
+  <header class="topbar">
+    <a class="brand" href="#create" aria-label="TerraNore — тестовая сборка"><span class="brand-mark">TN</span><span><strong>TerraNore</strong><small>ТЕСТОВАЯ СБОРКА</small></span></a>
+    <nav aria-label="Основная навигация">
+      <button class="nav-item active" data-view="create"><span>01</span> Создание мира</button>
+      <button class="nav-item" data-view="simulation"><span>02</span> Симуляция</button>
+      <button class="nav-item" data-view="explore"><span>03</span> Исследование</button>
+    </nav>
+    <div class="connection"><i></i><span id="connectionText">Подключение…</span></div>
   </header>
+
   <main>
-    <section class="hero">
-      <div><p class="eyebrow">ОБЗОР СИМУЛЯЦИИ</p><h1>Экономика мира</h1><p>Детерминированная модель регионов, ресурсов и рынков.</p></div>
-      <div class="controls"><button id="month">+ 1 месяц</button><button id="year" class="primary">▶ Симулировать год</button></div>
+    <section id="create" class="view active" aria-labelledby="create-title">
+      <div class="page-heading">
+        <div><p class="eyebrow">ИНИЦИАЛИЗАЦИЯ / 01</p><h1 id="create-title">Создание тестового мира</h1><p>Настройте начальные условия детерминированной симуляции.</p></div>
+        <div class="build-stamp">ALGORITHM <b>TN-SIM 0.1.0</b></div>
+      </div>
+      <form id="worldForm" class="create-grid">
+        <div class="form-card wide">
+          <label for="seed">SEED МИРА</label>
+          <div class="input-action"><input id="seed" name="seed" inputmode="numeric" value="42" required><button id="randomSeed" type="button" class="icon-button" title="Сгенерировать seed">↻</button></div>
+          <small>Одинаковый seed и профиль гарантируют повторяемый результат.</small>
+        </div>
+        <div class="form-card"><label for="systems">СИСТЕМЫ</label><input id="systems" type="number" min="1" max="10000" value="64"><small>Звёздных систем</small></div>
+        <div class="form-card"><label for="settlements">ПОСЕЛЕНИЯ</label><input id="settlements" type="number" min="1" max="100000" value="320"><small>Начальных узлов</small></div>
+        <div class="form-card"><label for="startDate">НАЧАЛЬНАЯ ДАТА</label><input id="startDate" type="date" value="2200-01-01"></div>
+        <div class="form-card"><label for="accuracy">ПРОФИЛЬ ТОЧНОСТИ</label><select id="accuracy"><option>Быстрый</option><option selected>Сбалансированный</option><option>Исследовательский</option></select></div>
+        <div class="form-card"><label for="workers">РАБОЧИЕ ПОТОКИ</label><select id="workers"><option value="auto" selected>Автоматически</option><option>1</option><option>2</option><option>4</option><option>8</option></select><small id="cpuHint">Определяется системой</small></div>
+        <div class="create-submit wide"><div><span>ОЦЕНКА МИРА</span><b id="worldEstimate">≈ 4 480 объектов</b></div><button class="primary large" type="submit"><span>＋</span> Создать тестовый мир</button></div>
+      </form>
     </section>
-    <section class="metrics">
-      <article><label>Население</label><b id="population">—</b><span>в четырёх регионах</span></article>
-      <article><label>Казна мира</label><b id="treasury">—</b><span>совокупный баланс</span></article>
-      <article><label>Производство</label><b id="production">—</b><span>единиц за тик</span></article>
-      <article><label>Текущий тик</label><b id="tick">—</b><span>test-save-v1</span></article>
+
+    <section id="simulation" class="view" aria-labelledby="simulation-title">
+      <div class="page-heading compact"><div><p class="eyebrow">ВЫПОЛНЕНИЕ / 02</p><h1 id="simulation-title">Симуляция мира</h1></div><div class="sim-state"><i id="runDot"></i><span id="runState">ГОТОВА К ЗАПУСКУ</span></div></div>
+      <div class="simulation-layout">
+        <article class="panel run-panel">
+          <div class="section-title"><div><p class="eyebrow">ГОРИЗОНТ РАСЧЁТА</p><h2>Период симуляции</h2></div><span class="keyboard">⌘ ENTER</span></div>
+          <div class="period-grid" role="group" aria-label="Период симуляции">
+            <button data-ticks="1">1 месяц</button><button data-ticks="3">3 месяца</button><button class="selected" data-ticks="12">1 год</button><button data-ticks="60">5 лет</button><button data-ticks="120">10 лет</button><button data-ticks="1200">100 лет</button>
+          </div>
+          <label class="custom-period" for="customPeriod"><span>ПРОИЗВОЛЬНЫЙ ПЕРИОД</span><span><input id="customPeriod" type="number" min="1" value="24"><select id="customUnit"><option value="1">месяцев</option><option value="12">лет</option></select></span></label>
+          <div class="run-actions"><button id="runButton" class="primary">▶ Запустить</button><button id="pauseButton" disabled>Ⅱ Пауза</button><button id="resumeButton" disabled>▷ Продолжить</button><button id="stepButton">→ Один шаг</button><button id="cancelButton" class="danger" disabled>× Отмена</button></div>
+        </article>
+        <aside class="panel telemetry">
+          <p class="eyebrow">ТЕЛЕМЕТРИЯ</p><h2>Прогресс расчёта</h2>
+          <div class="date-readout"><small>ТЕКУЩАЯ ДАТА</small><strong id="currentDate">2200 · ЯНВАРЬ</strong></div>
+          <div class="progress-track"><i id="progressBar"></i></div><div class="progress-caption"><span id="progressLabel">0 / 0 тиков</span><b id="progressPercent">0%</b></div>
+          <dl class="telemetry-grid"><div><dt>СКОРОСТЬ</dt><dd id="speed">0 <small>тиков/с</small></dd></div><div><dt>ОЧЕРЕДЬ ЗАДАЧ</dt><dd id="queue">0</dd></div><div><dt>WORKERS</dt><dd id="workerUsage">0 / —</dd></div><div><dt>ОСТАЛОСЬ</dt><dd id="eta">—</dd></div></dl>
+          <div id="balanceWarning" class="warning" hidden><span>!</span><div><b>Предупреждение баланса</b><p>Обнаружено отклонение товарного баланса.</p></div></div>
+          <p class="stream-note"><i></i> Прогресс поступает через WebSocket · UI ≤ 8 Гц</p>
+        </aside>
+      </div>
     </section>
-    <section class="panel">
-      <div class="panel-head"><div><p class="eyebrow">КАРТА СОСТОЯНИЙ</p><h2>Регионы</h2></div><span>Уровень детализации</span></div>
-      <div id="regions" class="regions"></div>
+
+    <section id="explore" class="view explore-view" aria-labelledby="explore-title">
+      <div class="page-heading compact"><div><p class="eyebrow">АНАЛИЗ / 03</p><h1 id="explore-title">Исследование результатов</h1></div><div class="lod-switch" role="group" aria-label="Уровень детализации"><button class="active">AUTO</button><button>LOD 0</button><button>LOD 1</button><button>LOD 2</button></div></div>
+      <div class="explorer">
+        <aside class="tree-panel">
+          <div class="tree-head"><span>СТРУКТУРА МИРА</span><button id="treeSearchButton" aria-label="Поиск">⌕</button></div>
+          <div id="tree" class="tree" role="tree" aria-label="Иерархия объектов" tabindex="0"></div>
+          <div class="tree-foot"><span id="loadedNodes">0 узлов загружено</span><span>LAZY LOAD</span></div>
+        </aside>
+        <div class="object-workspace">
+          <article class="object-card">
+            <div class="object-icon">◎</div><div><p id="objectPath">WORLD / SECTOR-01</p><h2 id="objectName">Мир TerraNore</h2><span id="objectType">ГЛОБАЛЬНАЯ СИМУЛЯЦИЯ</span></div>
+            <dl><div><dt>НАСЕЛЕНИЕ</dt><dd id="objectPopulation">—</dd></div><div><dt>КАЗНА</dt><dd id="objectTreasury">—</dd></div><div><dt>СТАТУС</dt><dd class="healthy">● СТАБИЛЬНО</dd></div></dl>
+          </article>
+          <div id="tabs" class="tabs" role="tablist"><button class="active">Экономика</button><button>Население</button><button>Производство</button><button>Торговля</button><button>Транспорт</button><button>История</button><button>Диагностика</button></div>
+          <div class="analysis-grid">
+            <article class="panel chart-card">
+              <div class="card-head"><div><p class="eyebrow">ВРЕМЕННЫЕ РЯДЫ</p><h3 id="chartTitle">Экономика</h3></div><div class="legend"><i></i> Казна <i></i> Производство</div></div>
+              <canvas id="chart" height="210" aria-label="Временной график"></canvas>
+            </article>
+            <article class="panel compare-card"><p class="eyebrow">СРАВНЕНИЕ ДАТ</p><h3>Изменения состояния</h3><div class="date-compare"><label>ДАТА A<input id="dateA" type="month" value="2200-01"></label><span>→</span><label>ДАТА B<input id="dateB" type="month" value="2201-01"></label></div><dl><div><dt>Население</dt><dd class="positive">+2.4%</dd></div><div><dt>Производство</dt><dd class="positive">+8.7%</dd></div><div><dt>Индекс цен</dt><dd class="negative">−1.2%</dd></div></dl></article>
+            <article class="panel flow-card"><div class="card-head"><div><p class="eyebrow">ПОТОКИ</p><h3>Входящие и исходящие</h3></div><span>ПОСЛЕДНИЙ ТИК</span></div><div id="flows" class="paged-table"></div><div class="pagination"><button id="prevFlow">←</button><span id="flowPage">1 / 2</span><button id="nextFlow">→</button></div></article>
+            <article class="panel causes-card"><p class="eyebrow">ЦЕПОЧКА ПРИЧИН</p><h3>Выбранное событие</h3><ol><li><i></i><div><b>Рост спроса на материалы</b><small>рынок · тик 128</small></div></li><li><i></i><div><b>Снижение складских запасов</b><small>логистика · тик 129</small></div></li><li><i></i><div><b>Коррекция рыночной цены</b><small>экономика · тик 130</small></div></li></ol></article>
+            <article class="panel changes-card"><div class="card-head"><div><p class="eyebrow">КРУПНЕЙШИЕ ИЗМЕНЕНИЯ</p><h3>За выбранный период</h3></div><button>Экспорт ↗</button></div><div id="changes" class="change-list"></div></article>
+          </div>
+        </div>
+      </div>
     </section>
-    <footer><span>TerraNore Test · локальная сессия</span><code>/api/test/v1</code></footer>
   </main>
+  <footer><span>TerraNore — тестовая сборка</span><span>ALGORITHM <b>TN-SIM 0.1.0</b></span><span>SAVE FORMAT <b id="saveFormat">test-save-v1</b></span><span>SEED <b id="footerSeed">42</b></span></footer>
+  <div id="toast" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
 </body>
 </html>
