@@ -12,10 +12,19 @@ from src.simulation.model import Economy, Region, World
 FORMAT = "test-save-v1"
 
 
+def _world_from_dict(data: dict) -> World:
+    regions = [Region(**{**region, "economy": Economy(**region["economy"])}) for region in data["regions"]]
+    configuration = {
+        key: data[key]
+        for key in ("system_count", "settlement_count", "start_date", "accuracy_profile")
+        if key in data
+    }
+    return World(seed=data["seed"], tick=data["tick"], regions=regions, **configuration)
+
+
 def clone_world(world: World) -> World:
     data = deepcopy(world.to_dict())
-    regions = [Region(**{**region, "economy": Economy(**region["economy"])}) for region in data["regions"]]
-    return World(seed=data["seed"], tick=data["tick"], regions=regions)
+    return _world_from_dict(data)
 
 
 @dataclass(frozen=True)
@@ -65,10 +74,7 @@ class SnapshotStore:
     def open(self, snapshot_id: str) -> World:
         snapshot = self.snapshots[snapshot_id]
         data = self._blobs[snapshot.blob_id]
-        return clone_world(World(
-            seed=data["seed"], tick=data["tick"],
-            regions=[Region(**{**item, "economy": Economy(**item["economy"])}) for item in data["regions"]],
-        ))
+        return clone_world(_world_from_dict(data))
 
     def branch(self, snapshot_id: str, branch_id: str) -> World:
         if not branch_id or branch_id in self.branches:
@@ -89,5 +95,4 @@ def load_snapshot(path: str | Path) -> World:
     if payload.get("format") != FORMAT:
         raise ValueError("unsupported test save format")
     data = payload["world"]
-    regions = [Region(**{**region, "economy": Economy(**region["economy"])}) for region in data["regions"]]
-    return World(seed=data["seed"], tick=data["tick"], regions=regions)
+    return _world_from_dict(data)

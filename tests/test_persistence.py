@@ -11,7 +11,9 @@ from src.simulation import Simulation
 
 class PersistenceTests(unittest.TestCase):
     def test_snapshot_round_trip(self):
-        simulation = Simulation(seed=9)
+        simulation = Simulation(seed=9, workers=2)
+        simulation.world.start_date = "2345-06-07"
+        simulation.world.accuracy_profile = "research"
         expected = simulation.step(5)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "world.test-save.json"
@@ -19,6 +21,8 @@ class PersistenceTests(unittest.TestCase):
             actual = load_snapshot(path)
         self.assertEqual(FORMAT, "test-save-v1")
         self.assertEqual(expected.to_dict(), actual.to_dict())
+        self.assertEqual(actual.start_date, "2345-06-07")
+        self.assertEqual(actual.accuracy_profile, "research")
 
     def test_multilevel_history_preserves_pins_and_significant_dates(self):
         series = TimeSeries(HistoryPolicy(full_months=2, monthly_years=1, quarterly_years=2))

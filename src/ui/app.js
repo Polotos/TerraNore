@@ -32,7 +32,7 @@ async function request(path, options = {}) {
 }
 
 function worldDate(tick) {
-  const base = new Date(`${$('#startDate').value || '2200-01-01'}T00:00:00Z`);
+  const base = new Date(`${state?.world?.startDate || '2200-01-01'}T00:00:00Z`);
   const month = base.getUTCMonth() + tick;
   return { year: base.getUTCFullYear() + Math.floor(month / 12), month: ((month % 12) + 12) % 12 };
 }
@@ -49,6 +49,11 @@ function renderState(data, force = false) {
   setText('#objectPopulation', fmt.format(data.summary.population));
   setText('#objectTreasury', `${fmt.format(data.summary.treasury)} TN`);
   $('#seed').value = data.world.seed;
+  $('#systems').value = data.world.systemCount;
+  $('#settlements').value = data.world.settlementCount;
+  $('#startDate').value = data.world.startDate;
+  $('#accuracy').value = data.world.accuracyProfile;
+  $('#workers').value = String(data.world.workers);
   buildTree();
   drawChart();
 }
@@ -72,7 +77,12 @@ $('#worldForm').addEventListener('submit', async event => {
   event.preventDefault();
   const button = event.submitter; button.disabled = true; button.textContent = 'Создание…';
   try {
-    const data = await request('/reset', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ seed:Number($('#seed').value) }) });
+    const data = await request('/reset', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+      seed:Number($('#seed').value), systemCount:Number($('#systems').value),
+      settlementCount:Number($('#settlements').value), startDate:$('#startDate').value,
+      accuracyProfile:$('#accuracy').value,
+      workers:$('#workers').value === 'auto' ? 'auto' : Number($('#workers').value)
+    }) });
     renderState(data, true); toast('Тестовый мир создан'); switchView('simulation');
   } catch (error) { toast(`Ошибка: ${error.message}`); }
   finally { button.disabled = false; button.innerHTML = '<span>＋</span> Создать тестовый мир'; }
@@ -100,7 +110,7 @@ function paintProgress(completed, total) {
   const elapsed = Math.max(.1, (performance.now() - run.started) / 1000);
   const speed = Math.round(completed / elapsed); setText('#speed', `${speed} тиков/с`);
   setText('#queue', Math.max(0, total - completed));
-  const workers = $('#workers').value === 'auto' ? (navigator.hardwareConcurrency || 4) : $('#workers').value;
+  const workers = state?.world?.workers || 1;
   setText('#workerUsage', `${run.active ? workers : 0} / ${workers}`);
   setText('#eta', speed ? `${Math.ceil((total - completed) / speed)} с` : '—');
 }

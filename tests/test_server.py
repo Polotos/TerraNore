@@ -1,6 +1,7 @@
 import json
 import threading
 import unittest
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from src.server import create_server
@@ -26,3 +27,34 @@ class ServerTests(unittest.TestCase):
         request = Request(self.base + "/api/test/v1/tick", data=b'{"ticks":12}', headers={"Content-Type":"application/json"}, method="POST")
         updated = json.load(urlopen(request, timeout=2))
         self.assertEqual(updated["world"]["tick"], 12)
+
+    def test_world_creation_uses_and_returns_validated_configuration(self):
+        configuration = {
+            "seed": 91, "systemCount": 3, "settlementCount": 7,
+            "startDate": "2312-04-05", "accuracyProfile": "research", "workers": 2,
+        }
+        request = Request(
+            self.base + "/api/test/v1/worlds", data=json.dumps(configuration).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        state = json.load(urlopen(request, timeout=2))
+        self.assertEqual(state["world"]["systemCount"], 3)
+        self.assertEqual(state["world"]["settlementCount"], 7)
+        self.assertEqual(state["world"]["startDate"], "2312-04-05")
+        self.assertEqual(state["world"]["accuracyProfile"], "research")
+        self.assertEqual(state["world"]["workers"], 2)
+        self.assertEqual(len(state["world"]["regions"]), 7)
+        self.assertEqual(self.server.app.simulation.scheduler.workers, 2)
+
+    def test_world_creation_rejects_invalid_ranges(self):
+        invalid = {
+            "seed": 1, "systemCount": 0, "settlementCount": 1,
+            "startDate": "2200-01-01", "accuracyProfile": "balanced", "workers": 1,
+        }
+        request = Request(
+            self.base + "/api/test/v1/worlds", data=json.dumps(invalid).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with self.assertRaises(HTTPError) as raised:
+            urlopen(request, timeout=2)
+        self.assertEqual(raised.exception.code, 400)

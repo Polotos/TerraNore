@@ -7,6 +7,7 @@ import mimetypes
 import struct
 import threading
 from copy import deepcopy
+from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -33,7 +34,42 @@ class ApiError(Exception):
 def _clone_world(world: World) -> World:
     data = world.to_dict()
     regions = [Region(**{**item, "economy": Economy(**item["economy"])}) for item in data["regions"]]
-    return World(data["seed"], data["tick"], regions)
+    return World(
+        data["seed"], data["tick"], regions, data["system_count"],
+        data["settlement_count"], data["start_date"],
+        data["accuracy_profile"],
+    )
+
+
+ACCURACY_PROFILES = frozenset({"fast", "balanced", "research"})
+
+
+def _world_configuration(data: dict, defaults: World, default_workers: int) -> dict:
+    """Validate and normalize the public world-creation contract."""
+    seed = data.get("seed", defaults.seed)
+    if isinstance(seed, bool) or not isinstance(seed, int) or not -(2**63) <= seed < 2**63:
+        raise ApiError(400, "seed must be a signed 64-bit integer")
+    systems = data.get("systemCount", defaults.system_count)
+    settlements = data.get("settlementCount", defaults.settlement_count)
+    if isinstance(systems, bool) or not isinstance(systems, int) or not 1 <= systems <= 10_000:
+        raise ApiError(400, "systemCount must be between 1 and 10000")
+    if isinstance(settlements, bool) or not isinstance(settlements, int) or not 1 <= settlements <= 100_000:
+        raise ApiError(400, "settlementCount must be between 1 and 100000")
+    start_date = data.get("startDate", defaults.start_date)
+    try:
+        date.fromisoformat(start_date)
+    except (TypeError, ValueError):
+        raise ApiError(400, "startDate must be an ISO calendar date") from None
+    profile = data.get("accuracyProfile", defaults.accuracy_profile)
+    if profile not in ACCURACY_PROFILES:
+        raise ApiError(400, "unsupported accuracyProfile")
+    workers = data.get("workers", default_workers)
+    if workers != "auto" and (isinstance(workers, bool) or not isinstance(workers, int) or not 1 <= workers <= 256):
+        raise ApiError(400, "workers must be 'auto' or between 1 and 256")
+    return {
+        "seed": seed, "system_count": systems, "settlement_count": settlements,
+        "start_date": start_date, "accuracy_profile": profile, "workers": workers,
+    }
 
 
 class AppState:
@@ -80,7 +116,7 @@ class AppState:
         return {
             "product": "TerraNore Test", "saveFormat": FORMAT, "revision": self.revision,
             "readOnly": self.read_only, "branchId": self.branch_id,
-            "world": WorldDTO.from_world(world).to_dict(),
+            "world": WorldDTO.from_world(world, self.simulation.scheduler.workers).to_dict(),
             "summary": {
                 "year": world.tick // Simulation.TICKS_PER_YEAR,
                 "month": world.tick % Simulation.TICKS_PER_YEAR + 1,
@@ -162,11 +198,12 @@ class AppState:
             task.status = "cancelled"
         return task
 
-    def replace_world(self, world: World, *, read_only: bool = False, branch_id: str = "main") -> None:
+    def replace_world(self, world: World, *, workers: int | str | None = None,
+                      read_only: bool = False, branch_id: str = "main") -> None:
         if self.active_task_id and self.tasks[self.active_task_id].status in ("queued", "running", "paused"):
             raise ApiError(409, "a simulation task is active")
         self.simulation.close()
-        self.simulation = Simulation(world=world)
+        self.simulation = Simulation(world=world, workers="auto" if workers is None else workers)
         self.series = TimeSeries()
         self.series.capture(world)
         self.event_log = EventLog()
@@ -274,7 +311,12 @@ class TestRequestHandler(BaseHTTPRequestHandler):
     def _post_api(self, path: str, data: dict) -> tuple[int, dict]:
         if path in (f"{API}/worlds", f"{API}/world", f"{API}/reset"):
             self.app._assert_writable()
-            self.app.replace_world(World.create(int(data.get("seed", 42))))
+            configuration = _world_configuration(
+                data, self.app.simulation.world, self.app.simulation.scheduler.workers
+            )
+            workers = configuration.pop("workers")
+            world = World.create(**configuration)
+            self.app.replace_world(world, workers=workers)
             return (200 if path.endswith("/reset") else 201), self.app.payload()
         if path in (f"{API}/tick", f"{API}/simulation/step"):
             ticks = int(data.get("ticks", 1))
