@@ -40,6 +40,7 @@ class TimeSeries:
     """
 
     policy: HistoryPolicy = field(default_factory=HistoryPolicy)
+    object_id: str | None = None
     metadata: dict[str, dict[str, str]] = field(default_factory=lambda: {
         "population": {"name": "Population", "unit": "people"},
         "treasury": {"name": "Treasury", "unit": "currency"},
@@ -51,6 +52,11 @@ class TimeSeries:
     _pinned: list[tuple[int, int]] = field(default_factory=list, repr=False)
     _significant: set[int] = field(default_factory=set, repr=False)
 
+    def __post_init__(self) -> None:
+        if self.object_id is not None:
+            self.metadata["production"] = {"name": "Production", "unit": "goods"}
+            self._columns["production"] = []
+
     @property
     def points(self) -> list[dict]:
         return [
@@ -59,10 +65,17 @@ class TimeSeries:
         ]
 
     def capture(self, world: World, *, significant: bool = False) -> None:
+        regions = world.regions
+        if self.object_id is not None:
+            regions = [region for region in world.regions if region.id == self.object_id]
+            if not regions:
+                raise KeyError(self.object_id)
         values: dict[str, int | float] = {
-            "population": sum(region.population for region in world.regions),
-            "treasury": round(sum(region.economy.treasury for region in world.regions), 2),
+            "population": sum(region.population for region in regions),
+            "treasury": round(sum(region.economy.treasury for region in regions), 2),
         }
+        if "production" in self._columns:
+            values["production"] = round(sum(region.economy.production for region in regions), 2)
         if self._ticks and self._ticks[-1] == world.tick:
             for metric, value in values.items():
                 self._columns[metric][-1] = value

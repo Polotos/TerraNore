@@ -6,6 +6,12 @@ let selectedTicks = 12;
 let run = { active: false, paused: false, cancelled: false, startTick: 0, target: 0, started: 0 };
 let lastPaint = 0;
 let flowPage = 0;
+let selectedObjectId = null;
+let selectedMetric = 'treasury';
+let treeRoots = [];
+const expandedNodes = new Set();
+const childNodes = new Map();
+let explorerRequest = 0;
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -27,7 +33,11 @@ $$('.nav-item').forEach(button => button.addEventListener('click', () => switchV
 
 async function request(path, options = {}) {
   const response = await fetch(api + path, options);
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(`HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
   return response.json();
 }
 
@@ -54,8 +64,7 @@ function renderState(data, force = false) {
   $('#startDate').value = data.world.startDate;
   $('#accuracy').value = data.world.accuracyProfile;
   $('#workers').value = String(data.world.workers);
-  buildTree();
-  drawChart();
+  refreshExplorer();
 }
 
 function connectStream() {
@@ -91,9 +100,15 @@ $('#worldForm').addEventListener('submit', async event => {
 $$('.period-grid button').forEach(button => button.addEventListener('click', () => {
   $$('.period-grid button').forEach(item => item.classList.remove('selected'));
   button.classList.add('selected'); selectedTicks = Number(button.dataset.ticks);
+  if (selectedObjectId) { loadAnomalies(); loadSeries(selectedObjectId); }
 }));
-$('#customPeriod').addEventListener('input', () => { $$('.period-grid button').forEach(item => item.classList.remove('selected')); selectedTicks = Number($('#customPeriod').value) * Number($('#customUnit').value); });
-$('#customUnit').addEventListener('change', () => { selectedTicks = Number($('#customPeriod').value) * Number($('#customUnit').value); });
+function updateCustomPeriod() {
+  $$('.period-grid button').forEach(item => item.classList.remove('selected'));
+  selectedTicks = Number($('#customPeriod').value) * Number($('#customUnit').value);
+  if (selectedObjectId) { loadAnomalies(); loadSeries(selectedObjectId); }
+}
+$('#customPeriod').addEventListener('input', updateCustomPeriod);
+$('#customUnit').addEventListener('change', updateCustomPeriod);
 
 function setRunning(active) {
   run.active = active;
@@ -140,57 +155,217 @@ $('#pauseButton').addEventListener('click', () => { run.paused = true; setRunnin
 $('#resumeButton').addEventListener('click', () => { run.paused = false; setRunning(true); });
 $('#cancelButton').addEventListener('click', () => { run.cancelled = true; toast('Отмена после текущего пакета'); });
 
-function treeNodes() {
-  if (!state) return [];
-  const rows = [{ id:'world', level:0, label:'TerraNore', type:'World', expandable:true, open:true }];
-  state.world.regions.forEach((region, index) => {
-    rows.push({ id:region.id, level:1, label:`Sector ${String(index + 1).padStart(2,'0')}`, type:'Sector', expandable:true, open:index === 0, region });
-    if (index === 0) {
-      rows.push({ id:'system-1', level:2, label:'Helios', type:'System', expandable:true, open:true, region });
-      rows.push({ id:'planet-1', level:3, label:'Aurelia Prime', type:'Planet', expandable:true, open:true, region });
-      rows.push({ id:'settlement-1', level:4, label:region.name, type:'Settlement', expandable:true, open:false, region });
-      rows.push({ id:'station-1', level:3, label:'Lagrange Station', type:'Station', expandable:false, region });
-    }
-  }); return rows;
+const escapeHtml = value => String(value).replace(/[&<>"']/g, character => ({
+  '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+}[character]));
+
+function normalizeNode(item, level) {
+  return {
+    id: String(item.id), label: item.name || item.label || item.id,
+    type: item.type || 'object', level,
+    expandable: item.hasChildren !== false
+  };
+}
+
+function visibleTreeNodes(nodes = treeRoots, result = []) {
+  nodes.forEach(node => {
+    result.push(node);
+    if (expandedNodes.has(node.id)) visibleTreeNodes(childNodes.get(node.id) || [], result);
+  });
+  return result;
 }
 
 function buildTree() {
-  const tree = $('#tree'); if (!tree || !state) return;
-  const rows = treeNodes(); setText('#loadedNodes', `${rows.length} узлов загружено`);
-  tree.innerHTML = rows.map((row, i) => `<div class="tree-row ${i === 0 ? 'selected' : ''}" role="treeitem" aria-level="${row.level + 1}" data-index="${i}" style="padding-left:${10 + row.level * 16}px"><span class="twisty">${row.expandable ? (row.open ? '⌄' : '›') : ''}</span><span class="node-icon">${row.type === 'World' ? '◎' : row.type === 'Sector' ? '◇' : row.type === 'System' ? '✦' : '○'}</span><span>${row.label}</span></div>`).join('');
-  $$('.tree-row').forEach(node => node.addEventListener('click', () => selectNode(rows[Number(node.dataset.index)], node)));
+  const tree = $('#tree');
+  if (!tree) return;
+  const rows = visibleTreeNodes();
+  setText('#loadedNodes', `${rows.length} узлов загружено`);
+  tree.innerHTML = rows.map(row => `<div class="tree-row ${row.id === selectedObjectId ? 'selected' : ''}" role="treeitem" aria-level="${row.level + 1}" aria-expanded="${row.expandable ? expandedNodes.has(row.id) : ''}" data-id="${escapeHtml(row.id)}" style="padding-left:${10 + row.level * 16}px"><span class="twisty">${row.expandable ? (expandedNodes.has(row.id) ? '⌄' : '›') : ''}</span><span class="node-icon">${row.type === 'world' ? '◎' : row.type === 'region' ? '◇' : '○'}</span><span>${escapeHtml(row.label)}</span></div>`).join('');
+  $$('.tree-row').forEach(element => element.addEventListener('click', event => {
+    const row = rows.find(item => item.id === element.dataset.id);
+    if (!row) return;
+    if (event.target.classList.contains('twisty')) toggleNode(row);
+    else selectNode(row);
+  }));
 }
 
-function selectNode(row, node) {
-  $$('.tree-row').forEach(item => item.classList.remove('selected')); node.classList.add('selected');
-  setText('#objectName', row.label); setText('#objectType', row.type.toUpperCase());
-  setText('#objectPath', `WORLD / ${row.type.toUpperCase()} / ${row.id.toUpperCase()}`);
-  const region = row.region;
-  setText('#objectPopulation', fmt.format(region ? region.population : state.summary.population));
-  setText('#objectTreasury', `${fmt.format(region ? region.economy.treasury : state.summary.treasury)} TN`);
+async function refreshExplorer() {
+  if (!state) return;
+  const sequence = ++explorerRequest;
+  try {
+    const payload = await request('/nodes/world/children');
+    if (sequence !== explorerRequest) return;
+    treeRoots = payload.items.map(item => normalizeNode(item, 0));
+    const selected = visibleTreeNodes().find(item => item.id === selectedObjectId)
+      || treeRoots.find(item => item.id === selectedObjectId)
+      || treeRoots[0];
+    buildTree();
+    if (selected) await selectNode(selected, false);
+  } catch (error) {
+    if (sequence === explorerRequest) {
+      treeRoots = [];
+      $('#tree').innerHTML = '<p class="data-message">Не удалось загрузить структуру мира</p>';
+    }
+  }
 }
 
-$$('.lod-switch button').forEach(button => button.addEventListener('click', () => { $$('.lod-switch button').forEach(item => item.classList.remove('active')); button.classList.add('active'); toast(`Режим детализации: ${button.textContent}`); }));
-$$('#tabs button').forEach(button => button.addEventListener('click', () => { $$('#tabs button').forEach(item => item.classList.remove('active')); button.classList.add('active'); setText('#chartTitle', button.textContent); drawChart(); }));
+async function toggleNode(row) {
+  if (expandedNodes.has(row.id)) {
+    expandedNodes.delete(row.id);
+    buildTree();
+    return;
+  }
+  if (!childNodes.has(row.id)) {
+    try {
+      const payload = await request(`/nodes/${encodeURIComponent(row.id)}/children`);
+      childNodes.set(row.id, payload.items.map(item => normalizeNode(item, row.level + 1)));
+      if (!payload.items.length) row.expandable = false;
+    } catch (error) {
+      showUnavailable($('#tree'), 'Не удалось загрузить дочерние элементы');
+      return;
+    }
+  }
+  expandedNodes.add(row.id);
+  buildTree();
+}
+
+async function selectNode(row, refreshTree = true) {
+  selectedObjectId = row.id;
+  flowPage = 0;
+  if (refreshTree) buildTree();
+  const selection = selectedObjectId;
+  await Promise.all([
+    loadObjectCard(selection), loadFlows(selection), loadAnomalies(), loadSeries(selection)
+  ]);
+}
+
+async function loadObjectCard(objectId) {
+  try {
+    const payload = await request(`/objects/${encodeURIComponent(objectId)}`);
+    if (objectId !== selectedObjectId) return;
+    const object = payload.object;
+    setText('#objectName', object.name || object.id);
+    setText('#objectType', String(object.type || 'object').toUpperCase());
+    setText('#objectPath', `WORLD / ${String(object.type || 'OBJECT').toUpperCase()} / ${object.id.toUpperCase()}`);
+    setText('#objectPopulation', object.population == null ? '—' : fmt.format(object.population));
+    setText('#objectTreasury', object.economy?.treasury == null ? '—' : `${fmt.format(object.economy.treasury)} TN`);
+  } catch (error) {
+    if (objectId === selectedObjectId) {
+      setText('#objectName', 'данные пока не моделируются');
+      setText('#objectType', 'ОБЪЕКТ НЕДОСТУПЕН');
+      setText('#objectPopulation', '—'); setText('#objectTreasury', '—');
+    }
+  }
+}
+
+function showUnavailable(container, message = 'данные пока не моделируются') {
+  if (container) container.innerHTML = `<p class="data-message">${escapeHtml(message)}</p>`;
+}
+
+let flowItems = [];
+function renderFlows() {
+  const container = $('#flows');
+  if (!flowItems.length) { showUnavailable(container); setText('#flowPage', '—'); return; }
+  const pages = Math.ceil(flowItems.length / 3);
+  flowPage = Math.min(flowPage, pages - 1);
+  container.innerHTML = flowItems.slice(flowPage * 3, flowPage * 3 + 3).map(item => {
+    const direction = item.direction === 'incoming' || item.direction === 'in' ? 'in' : 'out';
+    const sign = direction === 'in' ? '+' : '−';
+    return `<div class="table-row"><b>${escapeHtml(item.name || item.metric || 'Поток')}</b><small>${escapeHtml(item.peerName || item.peerId || '')}</small><b class="${direction}">${sign} ${fmt.format(Math.abs(Number(item.value ?? item.amount ?? 0)))}</b></div>`;
+  }).join('');
+  setText('#flowPage', `${flowPage + 1} / ${pages}`);
+}
+
+async function loadFlows(objectId) {
+  try {
+    const payload = await request(`/objects/${encodeURIComponent(objectId)}/flows`);
+    if (objectId !== selectedObjectId) return;
+    flowItems = payload.items || [];
+    renderFlows();
+  } catch (error) {
+    if (objectId === selectedObjectId) { flowItems = []; renderFlows(); }
+  }
+}
+
+function selectedRange() {
+  const end = state?.world?.tick || 0;
+  return { start: Math.max(0, end - Math.max(1, selectedTicks)), end };
+}
+
+async function loadAnomalies() {
+  const { start, end } = selectedRange();
+  try {
+    const payload = await request(`/anomalies?from=${start}&to=${end}`);
+    const container = $('#changes');
+    if (!payload.items.length) {
+      showUnavailable(container, 'Аномалий за выбранный период не обнаружено');
+      return;
+    }
+    container.innerHTML = payload.items.map(item => `<div class="change-item"><b>${escapeHtml(item.kind || 'Аномалия')}</b><span>тик ${fmt.format(item.tick)}</span></div>`).join('');
+  } catch (error) { showUnavailable($('#changes')); }
+}
+
+let chartPoints = [];
+async function loadSeries(objectId) {
+  const { start, end } = selectedRange();
+  try {
+    const payload = await request(`/timeseries?from=${start}&to=${end}&metric=${encodeURIComponent(selectedMetric)}&objectId=${encodeURIComponent(objectId)}`);
+    if (objectId !== selectedObjectId) return;
+    chartPoints = payload.items || [];
+    drawChart();
+  } catch (error) {
+    if (objectId === selectedObjectId) { chartPoints = []; drawChart(); }
+  }
+}
 
 function drawChart() {
-  const canvas = $('#chart'); if (!canvas || !state || !canvas.offsetWidth) return;
-  const ratio = devicePixelRatio || 1; canvas.width = canvas.offsetWidth * ratio; canvas.height = 190 * ratio;
-  const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio); const w = canvas.offsetWidth, h = 190;
+  const canvas = $('#chart');
+  const message = $('#chartMessage');
+  if (!canvas || !canvas.offsetWidth) return;
+  if (!chartPoints.length) {
+    canvas.hidden = true; message.hidden = false;
+    return;
+  }
+  canvas.hidden = false; message.hidden = true;
+  const ratio = devicePixelRatio || 1;
+  canvas.width = canvas.offsetWidth * ratio; canvas.height = 190 * ratio;
+  const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio);
+  const width = canvas.offsetWidth, height = 190;
   ctx.strokeStyle = '#26342f'; ctx.lineWidth = 1;
-  for (let y=20;y<h;y+=38){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke()}
-  const points = state.series?.length > 1 ? state.series : Array.from({length:18},(_,i)=>({treasury:3200+i*55+Math.sin(i)*180,production:370+i*7+Math.cos(i*.8)*35}));
-  [['treasury','#9bdaa6'],['production','#e0ad62']].forEach(([key,color],line) => {
-    const values=points.map(p=>Number(p[key] ?? 0)), min=Math.min(...values), max=Math.max(...values); ctx.beginPath(); ctx.strokeStyle=color; ctx.lineWidth=1.7;
-    values.forEach((value,i)=>{const x=i/(values.length-1)*w,y=15+(1-(value-min)/(max-min||1))*(h-35); i?ctx.lineTo(x,y):ctx.moveTo(x,y)}); ctx.stroke();
+  for (let y = 20; y < height; y += 38) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke(); }
+  const values = chartPoints.map(point => Number(point[selectedMetric])).filter(Number.isFinite);
+  if (!values.length) { canvas.hidden = true; message.hidden = false; return; }
+  const min = Math.min(...values), max = Math.max(...values);
+  ctx.beginPath(); ctx.strokeStyle = '#9bdaa6'; ctx.lineWidth = 1.7;
+  values.forEach((value, index) => {
+    const x = values.length === 1 ? width / 2 : index / (values.length - 1) * width;
+    const y = 15 + (1 - (value - min) / (max - min || 1)) * (height - 35);
+    index ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
   });
+  ctx.stroke();
 }
 
-const flows = [['Продовольствие','North Reach','+ 8 420','in'],['Композиты','Iron Vale','− 3 180','out'],['Энергия','Amber Coast','+ 2 760','in'],['Механизмы','Verdant Basin','− 1 940','out'],['Медицина','Helios','+ 840','in'],['Топливо','Lagrange','− 620','out']];
-function renderFlows(){const page=flows.slice(flowPage*3,flowPage*3+3);$('#flows').innerHTML=page.map(x=>`<div class="table-row"><b>${x[0]}</b><small>${x[1]}</small><b class="${x[3]}">${x[2]}</b></div>`).join('');setText('#flowPage',`${flowPage+1} / 2`)}
-$('#prevFlow').addEventListener('click',()=>{flowPage=Math.max(0,flowPage-1);renderFlows()});$('#nextFlow').addEventListener('click',()=>{flowPage=Math.min(1,flowPage+1);renderFlows()});
-const changes=[['Aurelia Prime · население','+12 480'],['Helios · производство','+18.6%'],['Iron Vale · казна','−8.2%'],['Линия H-4 · поток','+5 820'],['Продовольствие · цена','−4.1%'],['Station-01 · запасы','+2 110']];
-$('#changes').innerHTML=changes.map(x=>`<div class="change-item"><b>${x[0]}</b><span>${x[1]}</span></div>`).join('');renderFlows();
+$('#prevFlow').addEventListener('click', () => { flowPage = Math.max(0, flowPage - 1); renderFlows(); });
+$('#nextFlow').addEventListener('click', () => { flowPage += 1; renderFlows(); });
+$$('.lod-switch button').forEach(button => button.addEventListener('click', async () => {
+  if (!selectedObjectId) return;
+  const level = button.textContent.trim().toLowerCase().replace(' ', '-');
+  try {
+    const data = await request(`/objects/${encodeURIComponent(selectedObjectId)}/lod`, {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ level })
+    });
+    $$('.lod-switch button').forEach(item => item.classList.toggle('active', item === button));
+    renderState(data, true);
+  } catch (error) { toast(`Не удалось изменить детализацию: ${error.message}`); }
+}));
+$$('#tabs button').forEach(button => button.addEventListener('click', () => {
+  $$('#tabs button').forEach(item => item.classList.remove('active'));
+  button.classList.add('active');
+  const metrics = { 'Экономика':'treasury', 'Население':'population', 'Производство':'production' };
+  selectedMetric = metrics[button.textContent] || button.textContent.toLowerCase();
+  setText('#chartTitle', button.textContent);
+  if (selectedObjectId) loadSeries(selectedObjectId);
+}));
 
 window.addEventListener('resize', drawChart);
 document.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') execute(selectedTicks); });

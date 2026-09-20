@@ -86,6 +86,11 @@ class ServerOperationTests(unittest.TestCase):
 
         self.post("/simulation/step", {"ticks": 2})
         self.assertTrue(self.get("/timeseries", **{"from": 0, "to": 100})["items"])
+        object_points = self.get(
+            "/timeseries", **{"from": 0, "to": 2, "objectId": "region-1", "metric": "production"}
+        )["items"]
+        self.assertEqual([point["tick"] for point in object_points], [0, 1, 2])
+        self.assertTrue(all(set(point) == {"tick", "production"} for point in object_points))
         self.assertIn("delta", self.get("/compare", left=0, right=2))
         self.assertIn("items", self.get("/events", **{"from": 0, "to": 2}))
         self.assertIn("items", self.get("/anomalies", **{"from": 0, "to": 2}))
