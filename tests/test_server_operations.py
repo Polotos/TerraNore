@@ -86,6 +86,15 @@ class ServerOperationTests(unittest.TestCase):
             loaded = self.post("/load", {"path": path})
         self.assertFalse(loaded["readOnly"])
 
+    def test_snapshot_continuation_requires_named_branch(self):
+        snapshot = self.post("/snapshots", {"id": "fork-point"})["snapshot"]
+        self.post(f"/snapshots/{snapshot['id']}/open")
+        branched = self.post(f"/snapshots/{snapshot['id']}/branch", {"branchId": "what-if"})
+        self.assertFalse(branched["readOnly"])
+        self.assertEqual(branched["branchId"], "what-if")
+        advanced = self.post("/simulation/step")
+        self.assertEqual(advanced["world"]["tick"], snapshot["tick"] + 1)
+
     def test_non_loopback_bind_is_rejected(self):
         with self.assertRaises(ValueError):
             create_server("0.0.0.0")
