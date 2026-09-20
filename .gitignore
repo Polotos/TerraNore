@@ -1,2 +1,5 @@
 __pycache__/
 *.py[cod]
+BUILD/logs/
+BUILD/out/
+/BUILD/build.exe
