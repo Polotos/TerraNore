@@ -3,7 +3,8 @@ const fmt = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 const months = ['ЯНВАРЬ','ФЕВРАЛЬ','МАРТ','АПРЕЛЬ','МАЙ','ИЮНЬ','ИЮЛЬ','АВГУСТ','СЕНТЯБРЬ','ОКТЯБРЬ','НОЯБРЬ','ДЕКАБРЬ'];
 let state = null;
 let selectedTicks = 12;
-let run = { active: false, paused: false, cancelled: false, startTick: 0, target: 0, started: 0 };
+let run = { active: false, paused: false, taskId: null, cancellationToken: null, startTick: 0, targetTick: 0, completed: 0, started: 0 };
+let taskPollTimer = null;
 let lastPaint = 0;
 let flowPage = 0;
 let selectedObjectId = null;
@@ -119,9 +120,12 @@ function setRunning(active) {
   setText('#runState', active ? (run.paused ? 'ПРИОСТАНОВЛЕНО' : 'РАСЧЁТ ВЫПОЛНЯЕТСЯ') : 'ГОТОВА К ЗАПУСКУ');
   $('#runButton').disabled = active; $('#pauseButton').disabled = !active || run.paused;
   $('#resumeButton').disabled = !active || !run.paused; $('#cancelButton').disabled = !active;
+  $('#stepButton').disabled = active;
 }
 
-function paintProgress(completed, total) {
+function paintProgress(task) {
+  const completed = Number(task.completed) || 0;
+  const total = Math.max(0, Number(task.targetTick) - Number(task.startTick));
   const percent = total ? Math.min(100, completed / total * 100) : 0;
   $('#progressBar').style.width = `${percent}%`; setText('#progressPercent', `${Math.round(percent)}%`);
   setText('#progressLabel', `${fmt.format(completed)} / ${fmt.format(total)} тиков`);
@@ -133,30 +137,98 @@ function paintProgress(completed, total) {
   setText('#eta', speed ? `${Math.ceil((total - completed) / speed)} с` : '—');
 }
 
+function rememberTask(task) {
+  run = {
+    active: ['queued', 'running', 'paused'].includes(task.status),
+    paused: task.status === 'paused', taskId: task.id,
+    cancellationToken: task.cancellationToken, startTick: task.startTick,
+    targetTick: task.targetTick, completed: task.completed, started: run.started || performance.now()
+  };
+  localStorage.setItem('terranore.activeTask', JSON.stringify({
+    taskId: run.taskId, cancellationToken: run.cancellationToken
+  }));
+  setRunning(run.active);
+  paintProgress(task);
+}
+
+function stopTaskPolling() {
+  clearTimeout(taskPollTimer);
+  taskPollTimer = null;
+}
+
+async function pollTask() {
+  if (!run.active || !run.taskId) return;
+  try {
+    const payload = await request(`/tasks/${encodeURIComponent(run.taskId)}`);
+    const task = payload.task;
+    rememberTask(task);
+    if (run.active) {
+      taskPollTimer = setTimeout(pollTask, 150);
+      return;
+    }
+    localStorage.removeItem('terranore.activeTask');
+    const latest = await request('/state');
+    renderState(latest, true);
+    if (task.status === 'completed') toast(`Рассчитано тиков: ${task.completed}`);
+    else if (task.status === 'cancelled') toast('Расчёт отменён');
+    else if (task.status === 'failed') toast(`Расчёт остановлен: ${task.error || 'ошибка сервера'}`);
+  } catch (error) {
+    stopTaskPolling();
+    setRunning(false);
+    toast(`Не удалось получить состояние задачи: ${error.message}`);
+  }
+}
+
+function trackTask(task) {
+  stopTaskPolling();
+  rememberTask(task);
+  if (run.active) taskPollTimer = setTimeout(pollTask, 0);
+}
+
 async function execute(ticks) {
   if (run.active || !state) return;
-  run = { active:true, paused:false, cancelled:false, startTick:state.world.tick, target:ticks, started:performance.now() };
-  setRunning(true); paintProgress(0, ticks);
-  // Chunking keeps requests short, makes cancellation useful and never blocks the DOM.
-  let completed = 0;
+  run.started = performance.now();
   try {
-    while (completed < ticks && !run.cancelled) {
-      if (run.paused) { await new Promise(resolve => setTimeout(resolve, 100)); continue; }
-      const chunk = Math.min(12, ticks - completed);
-      const data = await request('/tick', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ticks:chunk }) });
-      completed += chunk; renderState(data); paintProgress(completed, ticks);
-      await new Promise(resolve => requestAnimationFrame(resolve));
-    }
-    if (!run.cancelled) { renderState(state, true); toast(`Рассчитано тиков: ${completed}`); }
-  } catch (error) { $('#balanceWarning').hidden = false; toast(`Расчёт остановлен: ${error.message}`); }
-  finally { run.paused = false; setRunning(false); setText('#queue', '0'); }
+    const payload = await request('/simulation/run', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ targetTick: state.world.tick + ticks })
+    });
+    trackTask(payload.task);
+  } catch (error) {
+    setRunning(false);
+    $('#balanceWarning').hidden = false;
+    toast(`Расчёт не запущен: ${error.message}`);
+  }
 }
 
 $('#runButton').addEventListener('click', () => execute(Math.max(1, selectedTicks)));
-$('#stepButton').addEventListener('click', () => execute(1));
-$('#pauseButton').addEventListener('click', () => { run.paused = true; setRunning(true); });
-$('#resumeButton').addEventListener('click', () => { run.paused = false; setRunning(true); });
-$('#cancelButton').addEventListener('click', () => { run.cancelled = true; toast('Отмена после текущего пакета'); });
+$('#stepButton').addEventListener('click', async () => {
+  if (run.active || !state) return;
+  $('#stepButton').disabled = true;
+  try {
+    const data = await request('/simulation/step', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ticks:1 })
+    });
+    renderState(data, true);
+    toast('Выполнен один тик');
+  } catch (error) { toast(`Шаг не выполнен: ${error.message}`); }
+  finally { $('#stepButton').disabled = run.active; }
+});
+
+async function controlTask(operation) {
+  if (!run.active || !run.taskId) return;
+  try {
+    const payload = await request(`/simulation/${operation}`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+        taskId: run.taskId, cancellationToken: run.cancellationToken
+      })
+    });
+    trackTask(payload.task);
+  } catch (error) { toast(`Операция не выполнена: ${error.message}`); }
+}
+$('#pauseButton').addEventListener('click', () => controlTask('pause'));
+$('#resumeButton').addEventListener('click', () => controlTask('resume'));
+$('#cancelButton').addEventListener('click', () => controlTask('cancel'));
 
 const escapeHtml = value => String(value).replace(/[&<>"']/g, character => ({
   '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
@@ -401,6 +473,10 @@ $$('#tabs button').forEach(button => button.addEventListener('click', () => {
 window.addEventListener('resize', drawChart);
 document.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') execute(selectedTicks); });
 setText('#cpuHint', `${navigator.hardwareConcurrency || '—'} логических процессоров доступно`);
-request('/state').then(data => renderState(data, true)).catch(error => toast(`API недоступен: ${error.message}`));
+request('/state').then(data => {
+  renderState(data, true);
+  if (data.activeTask) trackTask(data.activeTask);
+  else localStorage.removeItem('terranore.activeTask');
+}).catch(error => toast(`API недоступен: ${error.message}`));
 connectStream();
 if (location.hash && $(location.hash)) switchView(location.hash.slice(1));
