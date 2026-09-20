@@ -33,12 +33,14 @@ $$('.nav-item').forEach(button => button.addEventListener('click', () => switchV
 
 async function request(path, options = {}) {
   const response = await fetch(api + path, options);
+  const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(`HTTP ${response.status}`);
+    const error = new Error(payload.error || `HTTP ${response.status}`);
     error.status = response.status;
+    error.diagnostic = payload.error;
     throw error;
   }
-  return response.json();
+  return payload;
 }
 
 function worldDate(tick) {
@@ -49,6 +51,7 @@ function worldDate(tick) {
 
 function renderState(data, force = false) {
   state = data;
+  updateLodAvailability();
   const now = performance.now();
   if (!force && now - lastPaint < 125) return; // cap expensive DOM paints at 8 Hz
   lastPaint = now;
@@ -243,12 +246,7 @@ async function loadObjectCard(objectId) {
   try {
     const payload = await request(`/objects/${encodeURIComponent(objectId)}`);
     if (objectId !== selectedObjectId) return;
-    const object = payload.object;
-    setText('#objectName', object.name || object.id);
-    setText('#objectType', String(object.type || 'object').toUpperCase());
-    setText('#objectPath', `WORLD / ${String(object.type || 'OBJECT').toUpperCase()} / ${object.id.toUpperCase()}`);
-    setText('#objectPopulation', object.population == null ? '—' : fmt.format(object.population));
-    setText('#objectTreasury', object.economy?.treasury == null ? '—' : `${fmt.format(object.economy.treasury)} TN`);
+    renderObjectCard(payload.object);
   } catch (error) {
     if (objectId === selectedObjectId) {
       setText('#objectName', 'данные пока не моделируются');
@@ -256,6 +254,26 @@ async function loadObjectCard(objectId) {
       setText('#objectPopulation', '—'); setText('#objectTreasury', '—');
     }
   }
+}
+
+function updateLodAvailability(busy = false) {
+  const disabled = busy || !selectedObjectId || Boolean(state?.readOnly);
+  $$('.lod-switch button').forEach(button => { button.disabled = disabled; });
+  $('.lod-switch')?.setAttribute('aria-busy', String(busy));
+  if (state?.readOnly) setText('#lodStatus', 'СНИМОК ТОЛЬКО ДЛЯ ЧТЕНИЯ');
+}
+
+function renderObjectCard(object) {
+  setText('#objectName', object.name || object.id);
+  setText('#objectType', String(object.type || 'object').toUpperCase());
+  setText('#objectPath', `WORLD / ${String(object.type || 'OBJECT').toUpperCase()} / ${object.id.toUpperCase()}`);
+  setText('#objectPopulation', object.population == null ? '—' : fmt.format(object.population));
+  setText('#objectTreasury', object.economy?.treasury == null ? '—' : `${fmt.format(object.economy.treasury)} TN`);
+  const manualLod = object.manualLod || object.detailLevel || 'auto';
+  const effectiveLod = object.effectiveLod || (manualLod === 'auto' ? 'lod-0' : manualLod);
+  $$('.lod-switch button').forEach(button => button.classList.toggle('active', button.dataset.level === manualLod));
+  setText('#lodStatus', `РУЧНОЙ: ${manualLod.toUpperCase()} · ЭФФЕКТИВНЫЙ: ${effectiveLod.toUpperCase()}`);
+  updateLodAvailability();
 }
 
 function showUnavailable(container, message = 'данные пока не моделируются') {
@@ -348,15 +366,28 @@ function drawChart() {
 $('#prevFlow').addEventListener('click', () => { flowPage = Math.max(0, flowPage - 1); renderFlows(); });
 $('#nextFlow').addEventListener('click', () => { flowPage += 1; renderFlows(); });
 $$('.lod-switch button').forEach(button => button.addEventListener('click', async () => {
-  if (!selectedObjectId) return;
-  const level = button.textContent.trim().toLowerCase().replace(' ', '-');
+  if (!selectedObjectId || state?.readOnly) return;
+  // Capture the real object, not the mutable tree selection, for this request.
+  const objectId = selectedObjectId;
+  const level = button.dataset.level;
+  const previousLevel = $('.lod-switch button.active')?.dataset.level || 'auto';
+  $$('.lod-switch button').forEach(item => item.classList.toggle('active', item === button));
+  updateLodAvailability(true);
   try {
-    const data = await request(`/objects/${encodeURIComponent(selectedObjectId)}/lod`, {
+    const data = await request(`/objects/${encodeURIComponent(objectId)}/lod`, {
       method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ level })
     });
-    $$('.lod-switch button').forEach(item => item.classList.toggle('active', item === button));
+    if (objectId !== selectedObjectId) return;
     renderState(data, true);
-  } catch (error) { toast(`Не удалось изменить детализацию: ${error.message}`); }
+    renderObjectCard(data.object);
+  } catch (error) {
+    if (objectId === selectedObjectId) {
+      $$('.lod-switch button').forEach(item => item.classList.toggle('active', item.dataset.level === previousLevel));
+      toast(`Не удалось изменить детализацию: ${error.diagnostic || error.message}`);
+    }
+  } finally {
+    if (objectId === selectedObjectId) updateLodAvailability();
+  }
 }));
 $$('#tabs button').forEach(button => button.addEventListener('click', () => {
   $$('#tabs button').forEach(item => item.classList.remove('active'));

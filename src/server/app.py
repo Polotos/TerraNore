@@ -397,7 +397,9 @@ class TestRequestHandler(BaseHTTPRequestHandler):
         except ValueError:
             raise ApiError(400, "unsupported LOD") from None
         self.app.revision += 1
-        return 200, self.app.payload()
+        payload = self.app.payload()
+        payload["object"] = self._region_card(self._region(object_id))
+        return 200, payload
 
     def _region(self, object_id: str) -> Region:
         region = next((r for r in self.app.simulation.world.regions if r.id == object_id), None)
@@ -406,10 +408,15 @@ class TestRequestHandler(BaseHTTPRequestHandler):
         return region
 
     def _region_card(self, region: Region) -> dict:
+        node = self.app.simulation.world.simulation_node(region.id)
+        manual_lod = external_lod(node)
+        effective_lod = f"lod-{int(node.effective_lod())}"
         return {
             "id": region.id, "type": "region", "name": region.name,
             "population": region.population, "resources": region.resources,
-            "detailLevel": external_lod(self.app.simulation.world.simulation_node(region.id)),
+            # Keep detailLevel as the backwards-compatible manual selection.
+            "detailLevel": manual_lod, "manualLod": manual_lod,
+            "effectiveLod": effective_lod,
             "economy": deepcopy(region.economy.__dict__),
         }
 
