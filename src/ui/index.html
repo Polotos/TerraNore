@@ -77,13 +77,14 @@
           <div id="tabs" class="tabs" role="tablist"><button class="active">Экономика</button><button>Население</button><button>Производство</button><button>Торговля</button><button>Транспорт</button><button>История</button><button>Диагностика</button></div>
           <div class="analysis-grid">
             <article class="panel chart-card">
-              <div class="card-head"><div><p class="eyebrow">ВРЕМЕННЫЕ РЯДЫ</p><h3 id="chartTitle">Экономика</h3></div><div class="legend"><i></i> Казна <i></i> Производство</div></div>
+              <div class="card-head"><div><p class="eyebrow">ВРЕМЕННЫЕ РЯДЫ</p><h3 id="chartTitle">Экономика</h3></div><div class="legend"><i></i> Выбранный показатель</div></div>
               <canvas id="chart" height="210" aria-label="Временной график"></canvas>
+              <p id="chartMessage" class="data-message" hidden>данные пока не моделируются</p>
             </article>
-            <article class="panel compare-card"><p class="eyebrow">СРАВНЕНИЕ ДАТ</p><h3>Изменения состояния</h3><div class="date-compare"><label>ДАТА A<input id="dateA" type="month" value="2200-01"></label><span>→</span><label>ДАТА B<input id="dateB" type="month" value="2201-01"></label></div><dl><div><dt>Население</dt><dd class="positive">+2.4%</dd></div><div><dt>Производство</dt><dd class="positive">+8.7%</dd></div><div><dt>Индекс цен</dt><dd class="negative">−1.2%</dd></div></dl></article>
+            <article class="panel compare-card"><p class="eyebrow">СРАВНЕНИЕ ДАТ</p><h3>Изменения состояния</h3><p class="data-message">данные пока не моделируются</p></article>
             <article class="panel flow-card"><div class="card-head"><div><p class="eyebrow">ПОТОКИ</p><h3>Входящие и исходящие</h3></div><span>ПОСЛЕДНИЙ ТИК</span></div><div id="flows" class="paged-table"></div><div class="pagination"><button id="prevFlow">←</button><span id="flowPage">1 / 2</span><button id="nextFlow">→</button></div></article>
-            <article class="panel causes-card"><p class="eyebrow">ЦЕПОЧКА ПРИЧИН</p><h3>Выбранное событие</h3><ol><li><i></i><div><b>Рост спроса на материалы</b><small>рынок · тик 128</small></div></li><li><i></i><div><b>Снижение складских запасов</b><small>логистика · тик 129</small></div></li><li><i></i><div><b>Коррекция рыночной цены</b><small>экономика · тик 130</small></div></li></ol></article>
-            <article class="panel changes-card"><div class="card-head"><div><p class="eyebrow">КРУПНЕЙШИЕ ИЗМЕНЕНИЯ</p><h3>За выбранный период</h3></div><button>Экспорт ↗</button></div><div id="changes" class="change-list"></div></article>
+            <article class="panel causes-card"><p class="eyebrow">ЦЕПОЧКА ПРИЧИН</p><h3>Выбранное событие</h3><p class="data-message">данные пока не моделируются</p></article>
+            <article class="panel changes-card"><div class="card-head"><div><p class="eyebrow">АНОМАЛИИ</p><h3>За выбранный период</h3></div></div><div id="changes" class="change-list"></div></article>
           </div>
         </div>
       </div>

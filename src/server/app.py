@@ -79,6 +79,7 @@ class AppState:
         self.snapshot_store = SnapshotStore(self.simulation.world, interval=snapshot_interval)
         self.series = TimeSeries()
         self.series.capture(self.simulation.world)
+        self.object_series = self._new_object_series(self.simulation.world)
         self.lock = threading.RLock()
         self.revision = 1
         self.read_only = False
@@ -100,8 +101,12 @@ class AppState:
                 payload=dict(event.payload),
             ))
         self.series.capture(self.simulation.world)
+        for series in self.object_series.values():
+            series.capture(self.simulation.world)
         self.snapshot_store.create_if_due(self.simulation.world, branch_id=self.branch_id)
         self.series.compact(tick)
+        for series in self.object_series.values():
+            series.compact(tick)
         self.revision += 1
 
     def step(self, ticks: int) -> None:
@@ -206,10 +211,18 @@ class AppState:
         self.simulation = Simulation(world=world, workers="auto" if workers is None else workers)
         self.series = TimeSeries()
         self.series.capture(world)
+        self.object_series = self._new_object_series(world)
         self.event_log = EventLog()
         self.branch_id = branch_id
         self.read_only = read_only
         self.revision += 1
+
+    @staticmethod
+    def _new_object_series(world: World) -> dict[str, TimeSeries]:
+        result = {region.id: TimeSeries(object_id=region.id) for region in world.regions}
+        for series in result.values():
+            series.capture(world)
+        return result
 
 
 def _json(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
@@ -418,10 +431,18 @@ class TestRequestHandler(BaseHTTPRequestHandler):
         if limit < 1 or limit > MAX_SERIES_POINTS or requested > MAX_SERIES_POINTS:
             raise ApiError(413, "time-series request is too large")
         metric = query.get("metric", [None])[0]
-        allowed = {None, "population", "treasury"}
+        allowed = {None, "population", "treasury", "production"}
         if metric not in allowed:
             raise ApiError(400, "unknown time-series metric")
-        points = [deepcopy(p) for p in self.app.series.points if start <= p["tick"] <= end][:limit]
+        object_id = query.get("objectId", [None])[0]
+        series = self.app.series
+        if object_id is not None:
+            if object_id not in self.app.object_series:
+                raise ApiError(404, "unknown object")
+            series = self.app.object_series[object_id]
+        elif metric == "production":
+            raise ApiError(400, "production requires objectId")
+        points = [deepcopy(p) for p in series.points if start <= p["tick"] <= end][:limit]
         if metric:
             points = [{"tick": point["tick"], metric: point[metric]} for point in points]
         return {"revision": self.app.revision, "items": points}
