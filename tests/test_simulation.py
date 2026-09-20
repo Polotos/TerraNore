@@ -1,7 +1,7 @@
 import unittest
 
 from src.simulation import Simulation
-from src.simulation.lod import DetailSelector
+from src.simulation.lod import AUTO, DetailSelector, LOD
 
 
 class SimulationTests(unittest.TestCase):
@@ -17,7 +17,13 @@ class SimulationTests(unittest.TestCase):
 
     def test_lod_is_domain_only(self):
         world = Simulation().world
-        DetailSelector().set_level(world, "region-1", "detailed")
-        self.assertEqual(world.regions[0].detail_level, "detailed")
+        DetailSelector().set_level(world, "region-1", "lod-2")
+        self.assertEqual(world.simulation_node("region-1").lod_override, LOD.ENTERPRISE)
+        DetailSelector().set_level(world, "region-1", "lod-1")
+        self.assertEqual(world.simulation_node("region-1").lod_override, LOD.PLANET)
+        DetailSelector().set_level(world, "region-1", "lod-0")
+        self.assertEqual(world.simulation_node("region-1").lod_override, LOD.AGGREGATE)
+        DetailSelector().set_level(world, "region-1", "auto")
+        self.assertIs(world.simulation_node("region-1").lod_override, AUTO)
         with self.assertRaises(ValueError):
             DetailSelector().set_level(world, "region-1", "impossible")

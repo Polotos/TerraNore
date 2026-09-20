@@ -87,7 +87,8 @@ python -m src.simulation --years 100 --seed 42 --workers auto
 * `POST /simulation/run` и `GET /tasks/{id}`; управление выполняется через
   `POST /simulation/pause`, `/simulation/resume` и `/simulation/cancel`;
 * `GET /nodes/{id}/children`, `GET /objects/{id}` и
-  `PUT /objects/{id}/lod`;
+  `PUT /objects/{id}/lod` (поле `level` принимает только `auto`, `lod-0`,
+  `lod-1` или `lod-2`);
 * `GET /timeseries`, `/compare`, `/events`, `/events/{id}/causes` и
   `/anomalies` (границы периода задаются параметрами `from` и `to`);
 * `POST /snapshots`, `POST /snapshots/{id}/open`, `POST /save` и `POST /load`.

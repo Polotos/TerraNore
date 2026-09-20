@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlparse
 
 from src.persistence import EventLog, EventRecord, FORMAT, SnapshotStore, TimeSeries, load_snapshot, save_snapshot
 from src.simulation import Simulation
-from src.simulation.lod import DetailSelector
+from src.simulation.lod import DetailSelector, external_lod
 from src.simulation.model import Economy, Region, World
 
 from .dto import WorldDTO
@@ -350,12 +350,11 @@ class TestRequestHandler(BaseHTTPRequestHandler):
             raise ApiError(404, "unknown object")
         return region
 
-    @staticmethod
-    def _region_card(region: Region) -> dict:
+    def _region_card(self, region: Region) -> dict:
         return {
             "id": region.id, "type": "region", "name": region.name,
             "population": region.population, "resources": region.resources,
-            "detailLevel": region.detail_level,
+            "detailLevel": external_lod(self.app.simulation.world.simulation_node(region.id)),
             "economy": deepcopy(region.economy.__dict__),
         }
 
