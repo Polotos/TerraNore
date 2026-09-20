@@ -1,7 +1,7 @@
 import unittest
 
 from src.simulation.lod import (
-    AggregateState, Construction, LOD, LODSimulator, Shipment, SimulationNode,
+    AggregateState, Construction, LOD, LODSimulator, OverflowPolicy, Shipment, SimulationNode,
     aggregate, balance_of, change_lod,
 )
 
@@ -19,6 +19,47 @@ def state(population, food, money, infrastructure=1.0):
 
 
 class LODTests(unittest.TestCase):
+    def test_arrival_at_full_warehouse_keeps_remainder_in_shipment(self):
+        warehouse = state(10, 1000, 0)
+        warehouse.production_capacity["food"] = 0
+        warehouse.shipments.append(Shipment("food", 25, 0))
+        node = SimulationNode("warehouse", warehouse)
+
+        LODSimulator().advance(node, 1, LOD.AGGREGATE)
+
+        self.assertEqual(warehouse.stocks["food"], 1000)
+        self.assertEqual(sum(cargo.amount for cargo in warehouse.shipments), 25)
+        self.assertEqual(warehouse.rejected_cargo.get("food", 0), 0)
+        self.assertEqual(warehouse.losses.get("food", 0), 0)
+        self.assertEqual(warehouse.rounding.get("food", 0), 0)
+
+    def test_overproduction_is_rejected_instead_of_hidden_as_rounding(self):
+        warehouse = state(10, 995, 0)
+        warehouse.production_capacity["food"] = 20
+        warehouse.production_overflow_policy = OverflowPolicy.RETURN
+        node = SimulationNode("factory", warehouse)
+
+        LODSimulator().advance(node, 1, LOD.AGGREGATE)
+
+        self.assertEqual(warehouse.production["food"], 20)
+        self.assertEqual(warehouse.stocks["food"], 1000)
+        self.assertEqual(warehouse.rejected_cargo["food"], 15)
+        self.assertEqual(warehouse.rounding.get("food", 0), 0)
+        self.assertEqual(warehouse.resource_total("food"), 1015)
+
+    def test_destroyed_overflow_is_an_explicit_event_backed_loss(self):
+        warehouse = state(10, 1000, 0)
+        warehouse.production_capacity["food"] = 0
+        warehouse.shipments.append(Shipment(
+            "food", 4, 0, overflow_policy=OverflowPolicy.DESTROY,
+        ))
+
+        LODSimulator().advance(SimulationNode("warehouse", warehouse), 1, LOD.AGGREGATE)
+
+        self.assertEqual(warehouse.losses["food"], 4)
+        self.assertEqual(warehouse.events[-1].kind, "resource-loss")
+        self.assertEqual(warehouse.events[-1].amount, 4)
+
     def test_coarse_long_tick_uses_monthly_sequence(self):
         aggregate = state(10, 0, 0)
         aggregate.production_capacity["food"] = 0

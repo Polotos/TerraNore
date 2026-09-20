@@ -25,6 +25,8 @@ class Balance:
     infrastructure: float
     shipments: dict[str, float]
     construction_materials: dict[str, float]
+    losses: dict[str, float]
+    rejected_cargo: dict[str, float]
 
 
 def balance_of(nodes: list[SimulationNode]) -> Balance:
@@ -33,7 +35,7 @@ def balance_of(nodes: list[SimulationNode]) -> Balance:
     shipments: dict[str, float] = {}
     materials: dict[str, float] = {}
     for state in states:
-        keys = set(state.stocks) | set(state.rounding)
+        keys = set(state.stocks) | set(state.rounding) | set(state.rejected_cargo)
         for shipment in state.shipments:
             keys.add(shipment.resource)
             shipments[shipment.resource] = shipments.get(shipment.resource, 0.0) + shipment.amount
@@ -50,7 +52,8 @@ def balance_of(nodes: list[SimulationNode]) -> Balance:
     return Balance(resources, population, sum(s.money for s in states),
                    sum(s.capital for s in states),
                    _sum_maps(states, "production_capacity"), infrastructure,
-                   shipments, materials)
+                   shipments, materials, _sum_maps(states, "losses"),
+                   _sum_maps(states, "rejected_cargo"))
 
 
 def reconcile(before: Balance, after: Balance, tolerance: float = 1e-9) -> None:
@@ -61,7 +64,8 @@ def reconcile(before: Balance, after: Balance, tolerance: float = 1e-9) -> None:
     for name in ("population", "money", "capital", "infrastructure"):
         if not close(getattr(before, name), getattr(after, name)):
             raise ValueError(f"LOD reconciliation failed for {name}")
-    for name in ("resources", "production_capacity", "shipments", "construction_materials"):
+    for name in ("resources", "production_capacity", "shipments", "construction_materials",
+                 "losses", "rejected_cargo"):
         left, right = getattr(before, name), getattr(after, name)
         for key in set(left) | set(right):
             if not close(left.get(key, 0.0), right.get(key, 0.0)):
