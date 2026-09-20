@@ -295,11 +295,14 @@ class AppState:
             task.status = "failed"
 
     def control(self, operation: str, task_id: str | None, token: str | None) -> SimulationTask:
-        task_id = task_id or self.active_task_id
-        if not task_id or task_id not in self.tasks:
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise ApiError(400, "taskId is required")
+        if not isinstance(token, str) or not token.strip():
+            raise ApiError(400, "cancellationToken is required")
+        if task_id not in self.tasks:
             raise ApiError(404, "unknown task")
         task = self.tasks[task_id]
-        if token is not None and token != task.cancellation_token:
+        if token != task.cancellation_token:
             raise ApiError(403, "invalid cancellation token")
         if operation == "pause":
             if task.status not in ("queued", "running"):

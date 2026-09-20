@@ -86,12 +86,13 @@ class ServerOperationTests(unittest.TestCase):
         active = self.get("/state")["activeTask"]
         self.assertEqual(active["id"], created["id"])
         self.assertEqual(active["cancellationToken"], created["cancellationToken"])
-        paused = self.post("/simulation/pause", {"taskId": created["id"]})["task"]
+        control = {"taskId": created["id"], "cancellationToken": created["cancellationToken"]}
+        paused = self.post("/simulation/pause", control)["task"]
         self.assertEqual(paused["status"], "paused")
         with self.assertRaises(HTTPError) as error:
             self.post("/simulation/step", {"ticks": 1})
         self.assertEqual(error.exception.code, 409)
-        resumed = self.post("/simulation/resume", {"taskId": created["id"]})["task"]
+        resumed = self.post("/simulation/resume", control)["task"]
         self.assertIn(resumed["status"], ("paused", "running"))
         cancelled = self.post("/simulation/cancel", {
             "taskId": created["id"], "cancellationToken": created["cancellationToken"]
@@ -108,6 +109,39 @@ class ServerOperationTests(unittest.TestCase):
         self.assertIn("delta", self.get("/compare", left=0, right=2))
         self.assertIn("items", self.get("/events", **{"from": 0, "to": 2}))
         self.assertIn("items", self.get("/anomalies", **{"from": 0, "to": 2}))
+
+    def test_task_controls_require_matching_non_empty_token(self):
+        for operation in ("pause", "resume", "cancel"):
+            with self.subTest(operation=operation):
+                created = self.post("/simulation/run", {"targetTick": 1_000_000})["task"]
+                credentials = {
+                    "taskId": created["id"],
+                    "cancellationToken": created["cancellationToken"],
+                }
+                if operation == "resume":
+                    self.post("/simulation/pause", credentials)
+
+                with self.assertRaises(HTTPError) as error:
+                    self.post(f"/simulation/{operation}", {
+                        "cancellationToken": created["cancellationToken"],
+                    })
+                self.assertEqual(error.exception.code, 400)
+
+                for token, expected_status in ((None, 400), ("", 400), ("incorrect-token", 403)):
+                    request = {"taskId": created["id"]}
+                    if token is not None:
+                        request["cancellationToken"] = token
+                    with self.subTest(operation=operation, token=token):
+                        with self.assertRaises(HTTPError) as error:
+                            self.post(f"/simulation/{operation}", request)
+                        self.assertEqual(error.exception.code, expected_status)
+
+                result = self.post(f"/simulation/{operation}", credentials)["task"]
+                expected = {"pause": "paused", "resume": "running", "cancel": "cancelled"}[operation]
+                self.assertIn(result["status"], (expected, "paused") if operation == "resume" else (expected,))
+
+                if operation != "cancel":
+                    self.post("/simulation/cancel", credentials)
 
     def test_snapshots_and_save_load(self):
         snapshot = self.post("/snapshots")["snapshot"]
