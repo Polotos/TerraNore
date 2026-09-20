@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import mimetypes
+import socket
 import struct
 import threading
 from copy import deepcopy
@@ -23,12 +24,80 @@ from .tasks import SimulationTask
 API = "/api/test/v1"
 UI_ROOT = Path(__file__).parents[1] / "ui"
 MAX_SERIES_POINTS = 10_000
+MAX_WEBSOCKET_MESSAGE = 1_048_576
+
+
+def _websocket_frame(opcode: int, payload: bytes = b"") -> bytes:
+    """Encode an unmasked server frame, including RFC 6455 64-bit lengths."""
+    size = len(payload)
+    if size < 126:
+        length = bytes((size,))
+    elif size <= 0xFFFF:
+        length = b"\x7e" + struct.pack("!H", size)
+    else:
+        length = b"\x7f" + struct.pack("!Q", size)
+    return bytes((0x80 | opcode,)) + length + payload
+
+
+class WebSocketClient:
+    """A registered connection with serialized writes from arbitrary threads."""
+
+    def __init__(self, connection: socket.socket) -> None:
+        self.connection = connection
+        self.write_lock = threading.Lock()
+
+    def send(self, opcode: int, payload: bytes = b"") -> None:
+        with self.write_lock:
+            self.connection.sendall(_websocket_frame(opcode, payload))
+
+    def close(self) -> None:
+        try:
+            self.connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+
+class WebSocketRegistry:
+    """Thread-safe collection of live WebSocket clients."""
+
+    def __init__(self) -> None:
+        self._clients: set[WebSocketClient] = set()
+        self._lock = threading.Lock()
+
+    def add(self, client: WebSocketClient) -> None:
+        with self._lock:
+            self._clients.add(client)
+
+    def discard(self, client: WebSocketClient) -> None:
+        with self._lock:
+            self._clients.discard(client)
+
+    def broadcast(self, payload: dict) -> None:
+        encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+        with self._lock:
+            clients = tuple(self._clients)
+        for client in clients:
+            try:
+                client.send(0x1, encoded)
+            except OSError:
+                self.discard(client)
+                client.close()
+
+    def close_all(self) -> None:
+        with self._lock:
+            clients, self._clients = tuple(self._clients), set()
+        for client in clients:
+            client.close()
 
 
 class ApiError(Exception):
     def __init__(self, status: int, message: str) -> None:
         super().__init__(message)
         self.status = status
+
+
+class WebSocketProtocolError(Exception):
+    pass
 
 
 def _clone_world(world: World) -> World:
@@ -86,12 +155,17 @@ class AppState:
         self.tasks: dict[str, SimulationTask] = {}
         self.active_task_id: str | None = None
         self.event_log = EventLog()
+        self.websockets = WebSocketRegistry()
 
     def _assert_writable(self) -> None:
         if self.read_only:
             raise ApiError(409, "snapshot is read-only")
 
     def _record_step(self) -> None:
+        before_objects = {
+            region.id: (region.population, region.resources, tuple(region.economy.__dict__.values()))
+            for region in self.simulation.world.regions
+        }
         before = len(self.simulation.events)
         self.simulation.step(1)  # A tick is the atomic consistency boundary.
         tick = self.simulation.world.tick
@@ -108,6 +182,32 @@ class AppState:
         for series in self.object_series.values():
             series.compact(tick)
         self.revision += 1
+        changed = [
+            region.id for region in self.simulation.world.regions
+            if before_objects.get(region.id) != (
+                region.population, region.resources, tuple(region.economy.__dict__.values())
+            )
+        ]
+        self.websockets.broadcast(self.tick_message(changed))
+
+    def tick_message(self, changed_object_ids: list[str]) -> dict:
+        """Build the deliberately compact notification sent at a tick boundary."""
+        world = self.simulation.world
+        month_index = date.fromisoformat(world.start_date).month - 1 + world.tick
+        year = date.fromisoformat(world.start_date).year + month_index // 12
+        month = month_index % 12 + 1
+        task = self.tasks.get(self.active_task_id) if self.active_task_id else None
+        return {
+            "revision": self.revision,
+            "currentDate": f"{year:04d}-{month:02d}",
+            "activeTask": task.dto().to_dict() if task else None,
+            "summary": {
+                "population": sum(item.population for item in world.regions),
+                "treasury": round(sum(item.economy.treasury for item in world.regions), 2),
+                "production": round(sum(item.economy.production for item in world.regions), 2),
+            },
+            "changedObjectIds": changed_object_ids,
+        }
 
     def step(self, ticks: int) -> None:
         self._assert_writable()
@@ -176,8 +276,18 @@ class AppState:
                     if self.simulation.world.tick >= task.target_tick:
                         task.status = "completed"
                         return
-                    self._record_step()
                     task.completed += 1
+                    final_tick = self.simulation.world.tick + 1 >= task.target_tick
+                    if final_tick:
+                        task.status = "completed"
+                    try:
+                        self._record_step()
+                    except Exception:
+                        task.completed -= 1
+                        task.status = "running"
+                        raise
+                    if final_tick:
+                        return
                 # Requests can run between atomic ticks even for short worlds.
                 threading.Event().wait(0.001)
         except Exception as error:  # task failures are observable via the task resource
@@ -501,7 +611,7 @@ class TestRequestHandler(BaseHTTPRequestHandler):
 
     def _websocket(self) -> None:
         key = self.headers.get("Sec-WebSocket-Key")
-        if not key:
+        if not key or self.headers.get("Sec-WebSocket-Version") != "13":
             self.send_error(400)
             return
         accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
@@ -510,12 +620,82 @@ class TestRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Connection", "Upgrade")
         self.send_header("Sec-WebSocket-Accept", accept)
         self.end_headers()
-        data = json.dumps(self.app.payload(), ensure_ascii=False).encode()
-        header = b"\x81" + (bytes([len(data)]) if len(data) < 126 else b"\x7e" + struct.pack("!H", len(data)))
-        self.connection.sendall(header + data)
+        client = WebSocketClient(self.connection)
+        self.app.websockets.add(client)
+        self.connection.settimeout(30)
+        try:
+            client.send(0x1, json.dumps(
+                self.app.tick_message([]), ensure_ascii=False, separators=(",", ":")
+            ).encode())
+            while True:
+                try:
+                    opcode, payload = self._read_websocket_frame()
+                except TimeoutError:
+                    client.send(0x9, b"terranore")
+                    continue
+                if opcode == 0x8:  # close
+                    if len(payload) == 1:
+                        raise WebSocketProtocolError("invalid close payload")
+                    client.send(0x8, payload or struct.pack("!H", 1000))
+                    break
+                if opcode == 0x9:  # ping
+                    client.send(0xA, payload)
+                elif opcode == 0xA:  # pong
+                    continue
+                else:
+                    client.send(0x8, struct.pack("!H", 1003))
+                    break
+        except WebSocketProtocolError:
+            try:
+                client.send(0x8, struct.pack("!H", 1002))
+            except OSError:
+                pass
+        except (EOFError, OSError):
+            pass
+        finally:
+            self.app.websockets.discard(client)
+
+    def _read_websocket_frame(self) -> tuple[int, bytes]:
+        header = self._read_exact(2)
+        first, second = header
+        if first & 0x70 or not first & 0x80:
+            raise WebSocketProtocolError("invalid or fragmented frame")
+        opcode = first & 0x0F
+        if opcode not in (0x8, 0x9, 0xA):
+            raise WebSocketProtocolError("unsupported opcode")
+        masked = bool(second & 0x80)
+        if not masked:  # RFC 6455 requires every client frame to be masked.
+            raise WebSocketProtocolError("unmasked client frame")
+        size = second & 0x7F
+        if size == 126:
+            size = struct.unpack("!H", self._read_exact(2))[0]
+        elif size == 127:
+            size = struct.unpack("!Q", self._read_exact(8))[0]
+            if size & (1 << 63):
+                raise WebSocketProtocolError("invalid frame length")
+        if size > MAX_WEBSOCKET_MESSAGE or (opcode >= 0x8 and size > 125):
+            raise WebSocketProtocolError("frame too large")
+        mask = self._read_exact(4)
+        payload = self._read_exact(size)
+        return opcode, bytes(value ^ mask[index % 4] for index, value in enumerate(payload))
+
+    def _read_exact(self, size: int) -> bytes:
+        result = bytearray()
+        while len(result) < size:
+            chunk = self.connection.recv(size - len(result))
+            if not chunk:
+                raise EOFError
+            result.extend(chunk)
+        return bytes(result)
 
     def log_message(self, format: str, *args: object) -> None:
         print(f"[TerraNore Test] {self.address_string()} - {format % args}")
+
+
+class TerraNoreHTTPServer(ThreadingHTTPServer):
+    def server_close(self) -> None:
+        self.app.websockets.close_all()  # type: ignore[attr-defined]
+        super().server_close()
 
 
 def create_server(host: str = "127.0.0.1", port: int = 0, seed: int = 42,
@@ -523,6 +703,6 @@ def create_server(host: str = "127.0.0.1", port: int = 0, seed: int = 42,
     # Refuse an accidental public bind: this API controls local files and worlds.
     if host not in ("127.0.0.1", "::1", "localhost"):
         raise ValueError("the test API may only bind to a loopback interface")
-    server = ThreadingHTTPServer((host, port), TestRequestHandler)
+    server = TerraNoreHTTPServer((host, port), TestRequestHandler)
     server.app = AppState(seed, snapshot_interval)  # type: ignore[attr-defined]
     return server

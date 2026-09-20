@@ -13,6 +13,7 @@ let treeRoots = [];
 const expandedNodes = new Set();
 const childNodes = new Map();
 let explorerRequest = 0;
+let streamRefresh = null;
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -75,7 +76,17 @@ function connectStream() {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket = new WebSocket(`${protocol}//${location.host}${api}/ws`);
   socket.onopen = () => { $('.connection').classList.remove('offline'); setText('#connectionText', 'Поток данных активен'); };
-  socket.onmessage = event => renderState(JSON.parse(event.data));
+  socket.onmessage = event => {
+    const update = JSON.parse(event.data);
+    if (state && update.revision <= state.revision) return;
+    // Tick notifications are intentionally compact; coalesce fast runs and
+    // obtain the complete DTO through the regular HTTP consistency boundary.
+    clearTimeout(streamRefresh);
+    streamRefresh = setTimeout(async () => {
+      try { renderState(await request('/state')); }
+      catch (error) { $('.connection').classList.add('offline'); }
+    }, 50);
+  };
   socket.onerror = () => { $('.connection').classList.add('offline'); setText('#connectionText', 'Режим HTTP'); };
   socket.onclose = () => setTimeout(connectStream, 4000);
 }
