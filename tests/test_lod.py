@@ -2,7 +2,7 @@ import unittest
 
 from src.simulation.lod import (
     AggregateState, Construction, LOD, LODSimulator, Shipment, SimulationNode,
-    balance_of, change_lod,
+    aggregate, balance_of, change_lod,
 )
 
 
@@ -59,6 +59,26 @@ class LODTests(unittest.TestCase):
         LODSimulator().advance(parent, 1, LOD.AGGREGATE)
 
         self.assertGreater(child.state.production["food"], 0)
+
+    def test_detailed_child_is_excluded_from_coarse_parent_tick(self):
+        detailed = SimulationNode("detailed", state(10, 50, 70), LOD.ENTERPRISE)
+        detailed.state.consumption["food"] = 2
+        detailed.set_lod(LOD.ENTERPRISE)
+        coarse = SimulationNode("coarse", state(10, 50, 30), LOD.ENTERPRISE)
+        coarse.state.consumption["food"] = 2
+        parent = SimulationNode(
+            "system",
+            aggregate([detailed, coarse]),
+            children=[detailed, coarse],
+        )
+
+        LODSimulator().advance(parent, 1, LOD.AGGREGATE)
+
+        self.assertEqual(parent.state.production["food"], 20)
+        self.assertEqual(parent.state.consumption["food"], 4)
+        self.assertEqual(parent.state.population, 20)
+        self.assertEqual(parent.state.stocks["food"], 116)
+        self.assertEqual(parent.state.money, 100)
 
 
 if __name__ == "__main__":
