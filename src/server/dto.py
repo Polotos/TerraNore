@@ -30,13 +30,23 @@ class RegionDTO:
 class WorldDTO:
     seed: int
     tick: int
+    system_count: int
+    settlement_count: int
+    start_date: str
+    accuracy_profile: str
+    workers: int
     regions: tuple[RegionDTO, ...]
 
     @classmethod
-    def from_world(cls, world: World) -> "WorldDTO":
+    def from_world(cls, world: World, workers: int = 1) -> "WorldDTO":
         return cls(
             world.seed,
             world.tick,
+            world.system_count,
+            world.settlement_count,
+            world.start_date,
+            world.accuracy_profile,
+            workers,
             tuple(
                 RegionDTO(
                     region.id,
@@ -57,7 +67,13 @@ class WorldDTO:
 
     def to_dict(self) -> dict:
         """Return a fresh JSON object, never a reference into the domain model."""
-        return asdict(self)
+        result = asdict(self)
+        for snake, camel in (
+            ("system_count", "systemCount"), ("settlement_count", "settlementCount"),
+            ("start_date", "startDate"), ("accuracy_profile", "accuracyProfile"),
+        ):
+            result[camel] = result.pop(snake)
+        return result
 
 
 @dataclass(frozen=True)

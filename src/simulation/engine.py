@@ -52,8 +52,8 @@ class Simulation:
     ) -> None:
         if history_limit < 1 or event_limit < 1:
             raise ValueError("history and event limits must be positive")
-        self.world = world or World.create(seed)
         self.scheduler = DeterministicScheduler(workers, max_pending)
+        self.world = world or World.create(seed)
         self.history: deque[PublishedTick] = deque(maxlen=history_limit)
         self.events: deque[Event] = deque(maxlen=event_limit)
 
