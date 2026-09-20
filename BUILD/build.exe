@@ -1,9 +1,0 @@
-#!/usr/bin/env python3
-"""Cross-platform test launcher; kept under the conventional BUILD name."""
-import runpy
-import sys
-from pathlib import Path
-
-root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(root))
-runpy.run_module("src.server", run_name="__main__")
