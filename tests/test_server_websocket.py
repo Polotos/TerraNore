@@ -79,7 +79,7 @@ class WebSocketServerTests(unittest.TestCase):
         first = json.loads(receive_frame(connection)[1])
         second = json.loads(receive_frame(connection)[1])
         self.assertEqual((first["revision"], second["revision"]), (2, 3))
-        self.assertEqual(second["currentDate"], "2200-03")
+        self.assertEqual(second["currentDate"], "01.1\\3.1.4300")
         self.assertTrue(second["changedObjectIds"])
 
         connection.sendall(masked_frame(0x9, b"health"))

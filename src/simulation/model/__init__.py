@@ -1,3 +1,3 @@
-from .world import Economy, Region, World
+from .world import Economy, Region, SimulationDate, World
 
-__all__ = ["Economy", "Region", "World"]
+__all__ = ["Economy", "Region", "SimulationDate", "World"]

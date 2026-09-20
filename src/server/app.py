@@ -8,7 +8,6 @@ import socket
 import struct
 import threading
 from copy import deepcopy
-from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PureWindowsPath
 from urllib.parse import parse_qs, urlparse
@@ -16,7 +15,7 @@ from urllib.parse import parse_qs, urlparse
 from src.persistence import EventLog, EventRecord, FORMAT, SnapshotStore, TimeSeries, load_snapshot, save_snapshot
 from src.simulation import Simulation
 from src.simulation.lod import DetailSelector, external_lod
-from src.simulation.model import Economy, Region, World
+from src.simulation.model import Economy, Region, SimulationDate, World
 
 from .dto import WorldDTO
 from .tasks import SimulationTask
@@ -103,11 +102,15 @@ class WebSocketProtocolError(Exception):
 def _clone_world(world: World) -> World:
     data = world.to_dict()
     regions = [Region(**{**item, "economy": Economy(**item["economy"])}) for item in data["regions"]]
-    return World(
-        data["seed"], data["tick"], regions, data["system_count"],
-        data["settlement_count"], data["start_date"],
-        data["accuracy_profile"],
+    cloned = World(
+        seed=data["seed"], tick=data["tick"], regions=regions,
+        system_count=data["system_count"], settlement_count=data["settlement_count"],
+        initial_date=SimulationDate.parse(data["initial_date"]),
+        current_date=SimulationDate.parse(data["current_date"]),
+        accuracy_profile=data["accuracy_profile"],
     )
+    cloned._legacy_iso_date = "start_date" in data and "-" in data["start_date"]
+    return cloned
 
 
 ACCURACY_PROFILES = frozenset({"fast", "balanced", "research"})
@@ -126,9 +129,9 @@ def _world_configuration(data: dict, defaults: World, default_workers: int) -> d
         raise ApiError(400, "settlementCount must be between 1 and 100000")
     start_date = data.get("startDate", defaults.start_date)
     try:
-        date.fromisoformat(start_date)
-    except (TypeError, ValueError):
-        raise ApiError(400, "startDate must be an ISO calendar date") from None
+        SimulationDate.parse(start_date)
+    except (TypeError, ValueError, OverflowError):
+        raise ApiError(400, "startDate must use day.decade\\third.quarter.year") from None
     profile = data.get("accuracyProfile", defaults.accuracy_profile)
     if profile not in ACCURACY_PROFILES:
         raise ApiError(400, "unsupported accuracyProfile")
@@ -214,13 +217,12 @@ class AppState:
     def tick_message(self, changed_object_ids: list[str]) -> dict:
         """Build the deliberately compact notification sent at a tick boundary."""
         world = self.simulation.world
-        month_index = date.fromisoformat(world.start_date).month - 1 + world.tick
-        year = date.fromisoformat(world.start_date).year + month_index // 12
-        month = month_index % 12 + 1
         task = self.tasks.get(self.active_task_id) if self.active_task_id else None
         return {
             "revision": self.revision,
-            "currentDate": f"{year:04d}-{month:02d}",
+            "currentDate": (f"{world.current_date.year:04d}-"
+                            f"{(world.current_date.quarter - 1) * 3 + world.current_date.third:02d}"
+                            if world._legacy_iso_date else str(world.current_date)),
             "activeTask": task.dto().to_dict() if task else None,
             "summary": {
                 "population": sum(item.population for item in world.regions),
@@ -266,6 +268,10 @@ class AppState:
         current = self.simulation.world.tick
         if target_tick < current:
             raise ApiError(400, "target date precedes current date")
+        try:
+            self.simulation.world.initial_date.add_ticks(target_tick)
+        except OverflowError:
+            raise ApiError(400, "target date exceeds the supported period") from None
         if self.active_task_id and self.tasks[self.active_task_id].status in ("queued", "running", "paused"):
             raise ApiError(409, "another simulation task is active")
         task = SimulationTask("run", current, target_tick)
@@ -611,18 +617,19 @@ class TestRequestHandler(BaseHTTPRequestHandler):
         return {"revision": self.app.revision, "left": deepcopy(a), "right": deepcopy(b),
                 "delta": {key: b[key] - a[key] for key in ("population", "treasury")}}
 
-    @staticmethod
-    def _target_tick(data: dict) -> int:
+    def _target_tick(self, data: dict) -> int:
         if "targetTick" in data:
             return int(data["targetTick"])
         value = data.get("targetDate")
-        if isinstance(value, int):
-            return value
-        if isinstance(value, dict):
-            year, month = int(value.get("year", 0)), int(value.get("month", 1))
-            if year < 0 or not 1 <= month <= Simulation.TICKS_PER_YEAR:
-                raise ApiError(400, "invalid target date")
-            return year * Simulation.TICKS_PER_YEAR + month - 1
+        if isinstance(value, str):
+            try:
+                target = SimulationDate.parse(value)
+                relative = self.app.simulation.world.current_date.ticks_until(target)
+                return self.app.simulation.world.tick + relative
+            except ValueError as error:
+                raise ApiError(400, str(error)) from None
+            except OverflowError:
+                raise ApiError(400, "target date exceeds the supported period") from None
         raise ApiError(400, "targetTick or targetDate is required")
 
     def _static(self, path: str) -> None:

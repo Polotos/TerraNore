@@ -204,6 +204,7 @@ class Simulation:
 
         # Publication is after all barriers and retained in a bounded deque.
         self.world.tick += 1
+        self.world.current_date = self.world.initial_date.add_ticks(self.world.tick)
         self.history.append(PublishedTick(
             self.world.tick,
             sum(region.population for region in self.world.regions),
