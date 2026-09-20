@@ -45,6 +45,13 @@ class ServerOperationTests(unittest.TestCase):
         changed = self.post("/objects/region-1/lod", {"level": "lod-2"})
         self.assertGreater(changed["revision"], revision)
         self.assertEqual(changed["world"]["regions"][0]["detail_level"], "lod-2")
+        self.assertEqual(changed["object"]["id"], "region-1")
+        self.assertEqual(changed["object"]["manualLod"], "lod-2")
+        self.assertEqual(changed["object"]["effectiveLod"], "lod-2")
+
+        automatic = self.post("/objects/region-1/lod", {"level": "auto"})
+        self.assertEqual(automatic["object"]["manualLod"], "auto")
+        self.assertEqual(automatic["object"]["effectiveLod"], "lod-0")
 
         with self.assertRaises(HTTPError) as error:
             self.get("/timeseries", **{"from": 0, "to": 10001})
@@ -55,7 +62,7 @@ class ServerOperationTests(unittest.TestCase):
         with self.assertRaises(HTTPError) as error:
             self.post("/lod", {"regionId": "region-1", "level": "ultra"})
         self.assertEqual(error.exception.code, 400)
-        self.assertEqual(self.get("/state")["revision"], changed["revision"])
+        self.assertEqual(self.get("/state")["revision"], automatic["revision"])
 
     def test_equal_period_results_survive_real_lod_transition_over_http(self):
         baseline = self.post("/simulation/step", {"ticks": 6})
