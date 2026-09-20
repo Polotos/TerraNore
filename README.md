@@ -37,6 +37,23 @@ python -m src.simulation --years 100 --seed 42 --workers auto
 Тестовый HTTP API размещён под `/api/test/v1`, WebSocket — по адресу
 `/api/test/v1/ws`, формат сохранения — `test-save-v1`.
 
+Сервер по умолчанию и принудительно слушает только loopback-интерфейс. API
+публикует номер `revision` вместе с отделёнными от модели DTO. Основные ресурсы:
+
+* `POST /worlds`, `GET /state`, `POST /simulation/step`;
+* `POST /simulation/run` и `GET /tasks/{id}`; управление выполняется через
+  `POST /simulation/pause`, `/simulation/resume` и `/simulation/cancel`;
+* `GET /nodes/{id}/children`, `GET /objects/{id}` и
+  `PUT /objects/{id}/lod`;
+* `GET /timeseries`, `/compare`, `/events`, `/events/{id}/causes` и
+  `/anomalies` (границы периода задаются параметрами `from` и `to`);
+* `POST /snapshots`, `POST /snapshots/{id}/open`, `POST /save` и `POST /load`.
+
+Длительный прогон возвращает HTTP 202, идентификатор задачи, прогресс и токен
+отмены. Пауза применяется между атомарными тиками: опубликованное состояние
+мира при этом всегда согласовано. Открытый снимок неизменяем; попытки шага или
+смены LOD возвращают HTTP 409.
+
 ## Структура
 
 * `src/simulation/model/` — состояния мира и экономики;
