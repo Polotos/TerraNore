@@ -68,3 +68,13 @@ class PersistenceTests(unittest.TestCase):
         branch.tick = 1
         self.assertIn("experiment", store.branches)
         self.assertEqual(store.open("manual").tick, 0)
+
+    def test_snapshot_store_rejects_snapshot_from_another_world(self):
+        first = SnapshotStore(Simulation(seed=1).world)
+        second = SnapshotStore(Simulation(seed=2).world)
+        second.snapshots["initial"] = first.snapshots["initial"]
+
+        with self.assertRaisesRegex(ValueError, "another world"):
+            second.open("initial")
+        with self.assertRaisesRegex(ValueError, "another world"):
+            second.branch("initial", "foreign")

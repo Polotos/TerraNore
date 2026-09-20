@@ -351,11 +351,14 @@ class AppState:
         return task
 
     def replace_world(self, world: World, *, workers: int | str | None = None,
-                      read_only: bool = False, branch_id: str = "main") -> None:
+                      read_only: bool = False, branch_id: str = "main",
+                      preserve_snapshot_store: bool = False) -> None:
         if self.active_task_id and self.tasks[self.active_task_id].status in ("queued", "running", "paused"):
             raise ApiError(409, "a simulation task is active")
         self.simulation.close()
         self.simulation = Simulation(world=world, workers="auto" if workers is None else workers)
+        if not preserve_snapshot_store:
+            self.snapshot_store = SnapshotStore(world, interval=self.snapshot_store.interval)
         self.series = TimeSeries()
         self.series.capture(world)
         self.object_series = self._new_object_series(world)
@@ -507,8 +510,15 @@ class TestRequestHandler(BaseHTTPRequestHandler):
             snapshot_id = path[len(f"{API}/snapshots/"):-len("/open")].strip("/")
             if snapshot_id not in self.app.snapshot_store.snapshots:
                 raise ApiError(404, "unknown snapshot")
-            self.app.replace_world(self.app.snapshot_store.open(snapshot_id), read_only=True,
-                                   branch_id=self.app.snapshot_store.snapshots[snapshot_id].branch_id)
+            try:
+                world = self.app.snapshot_store.open(snapshot_id)
+            except ValueError as error:
+                raise ApiError(409, str(error)) from None
+            self.app.replace_world(
+                world, read_only=True,
+                branch_id=self.app.snapshot_store.snapshots[snapshot_id].branch_id,
+                preserve_snapshot_store=True,
+            )
             return 200, self.app.payload()
         if path.startswith(f"{API}/snapshots/") and path.endswith("/branch"):
             snapshot_id = path[len(f"{API}/snapshots/"):-len("/branch")].strip("/")
@@ -519,7 +529,7 @@ class TestRequestHandler(BaseHTTPRequestHandler):
                 world = self.app.snapshot_store.branch(snapshot_id, branch_id)
             except ValueError as error:
                 raise ApiError(409, str(error)) from None
-            self.app.replace_world(world, branch_id=branch_id)
+            self.app.replace_world(world, branch_id=branch_id, preserve_snapshot_store=True)
             return 201, self.app.payload()
         if path == f"{API}/save":
             target = self.app.save_path(data.get("name", data.get("id")))

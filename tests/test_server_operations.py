@@ -178,6 +178,15 @@ class ServerOperationTests(unittest.TestCase):
         advanced = self.post("/simulation/step")
         self.assertEqual(advanced["world"]["tick"], snapshot["tick"] + 1)
 
+    def test_reset_starts_a_new_snapshot_store(self):
+        snapshot = self.post("/snapshots", {"id": "world-a"})["snapshot"]
+
+        self.post("/reset", {"seed": 99})
+
+        with self.assertRaises(HTTPError) as error:
+            self.post(f"/snapshots/{snapshot['id']}/open")
+        self.assertEqual(error.exception.code, 404)
+
     def test_non_loopback_bind_is_rejected(self):
         with self.assertRaises(ValueError):
             create_server("0.0.0.0")
