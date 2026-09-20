@@ -10,7 +10,7 @@ import threading
 from copy import deepcopy
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from urllib.parse import parse_qs, urlparse
 
 from src.persistence import EventLog, EventRecord, FORMAT, SnapshotStore, TimeSeries, load_snapshot, save_snapshot
@@ -142,7 +142,8 @@ def _world_configuration(data: dict, defaults: World, default_workers: int) -> d
 
 
 class AppState:
-    def __init__(self, seed: int = 42, snapshot_interval: int | None = None) -> None:
+    def __init__(self, seed: int = 42, snapshot_interval: int | None = None, *,
+                 saves_dir: str | Path = "saves", enable_developer_import: bool = False) -> None:
         self.simulation = Simulation(seed)
         self.branch_id = "main"
         self.snapshot_store = SnapshotStore(self.simulation.world, interval=snapshot_interval)
@@ -156,6 +157,26 @@ class AppState:
         self.active_task_id: str | None = None
         self.event_log = EventLog()
         self.websockets = WebSocketRegistry()
+        self.saves_dir = Path(saves_dir).resolve()
+        self.saves_dir.mkdir(parents=True, exist_ok=True)
+        self.enable_developer_import = enable_developer_import
+
+    def save_path(self, name: object) -> Path:
+        """Resolve a client save identifier without permitting filesystem escape."""
+        if not isinstance(name, str) or not name.strip():
+            raise ApiError(400, "save name is required")
+        candidate = Path(name.strip())
+        windows_candidate = PureWindowsPath(name.strip())
+        if (candidate.is_absolute() or windows_candidate.anchor
+                or ".." in candidate.parts or ".." in windows_candidate.parts):
+            raise ApiError(400, "save name must be relative and may not contain '..'")
+        normalized = Path(*(part for part in candidate.parts if part not in ("", ".")))
+        if not normalized.parts:
+            raise ApiError(400, "save name is required")
+        resolved = (self.saves_dir / normalized).resolve()
+        if resolved == self.saves_dir or self.saves_dir not in resolved.parents:
+            raise ApiError(400, "save name resolves outside the saves directory")
+        return resolved
 
     def _assert_writable(self) -> None:
         if self.read_only:
@@ -496,16 +517,21 @@ class TestRequestHandler(BaseHTTPRequestHandler):
             self.app.replace_world(world, branch_id=branch_id)
             return 201, self.app.payload()
         if path == f"{API}/save":
-            target = data.get("path")
-            if not target:
-                raise ApiError(400, "path is required")
+            target = self.app.save_path(data.get("name", data.get("id")))
             save_snapshot(_clone_world(self.app.simulation.world), target)
-            return 200, {"revision": self.app.revision, "format": FORMAT, "path": str(target)}
+            return 200, {"revision": self.app.revision, "format": FORMAT,
+                         "name": str(target.relative_to(self.app.saves_dir))}
         if path == f"{API}/load":
-            target = data.get("path")
-            if not target:
-                raise ApiError(400, "path is required")
+            target = self.app.save_path(data.get("name", data.get("id")))
             self.app.replace_world(load_snapshot(target))
+            return 200, self.app.payload()
+        if path == f"{API}/developer/import":
+            if not self.app.enable_developer_import:
+                raise ApiError(404, "developer import is disabled")
+            source = data.get("path")
+            if not isinstance(source, str) or not source:
+                raise ApiError(400, "path is required")
+            self.app.replace_world(load_snapshot(Path(source).expanduser().resolve()))
             return 200, self.app.payload()
         raise ApiError(404, "unknown test endpoint")
 
@@ -702,10 +728,12 @@ class TerraNoreHTTPServer(ThreadingHTTPServer):
 
 
 def create_server(host: str = "127.0.0.1", port: int = 0, seed: int = 42,
-                  snapshot_interval: int | None = None) -> ThreadingHTTPServer:
+                  snapshot_interval: int | None = None, *, saves_dir: str | Path = "saves",
+                  enable_developer_import: bool = False) -> ThreadingHTTPServer:
     # Refuse an accidental public bind: this API controls local files and worlds.
     if host not in ("127.0.0.1", "::1", "localhost"):
         raise ValueError("the test API may only bind to a loopback interface")
     server = TerraNoreHTTPServer((host, port), TestRequestHandler)
-    server.app = AppState(seed, snapshot_interval)  # type: ignore[attr-defined]
+    server.app = AppState(seed, snapshot_interval, saves_dir=saves_dir,
+                          enable_developer_import=enable_developer_import)  # type: ignore[attr-defined]
     return server
