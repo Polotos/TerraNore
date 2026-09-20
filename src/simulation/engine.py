@@ -160,8 +160,9 @@ class Simulation:
             raise RuntimeError(f"world invariant failed for {region.id}")
         return Delta(Simulation._key(snapshot, Phase.INVARIANTS, region.id, "validated"))
 
-    def _apply(self, deltas: list[Delta]) -> None:
+    def _apply(self, deltas: list[Delta]) -> tuple[Event, ...]:
         regions = {region.id: region for region in self.world.regions}
+        published: list[Event] = []
         for delta in sorted(deltas, key=lambda item: item.key):
             target_default = delta.key.object_id
             for change in delta.changes:
@@ -176,31 +177,43 @@ class Simulation:
                     raise ValueError(f"unknown delta operation: {change.operation}")
                 setattr(owner, parts[-1], value)
             self.events.extend(delta.events)
+            published.extend(delta.events)
+        return tuple(published)
 
-    def _region_phase(self, phase: Phase, function: Callable[[WorldSnapshot, str], Delta]) -> list[Delta]:
+    def _region_phase(
+        self, phase: Phase, function: Callable[[WorldSnapshot, str], Delta]
+    ) -> tuple[list[Delta], tuple[Event, ...]]:
         snapshot = freeze_world(self.world)
         deltas = self.scheduler.map(partial(_run_region_phase, function, snapshot), snapshot.regions)
-        self._apply(deltas)
-        return deltas
+        return deltas, self._apply(deltas)
 
-    def _tick(self) -> None:
+    def _tick(self) -> tuple[Event, ...]:
+        published: list[Event] = []
+
+        def region_phase(phase: Phase, function: Callable[[WorldSnapshot, str], Delta]) -> list[Delta]:
+            deltas, events = self._region_phase(phase, function)
+            published.extend(events)
+            return deltas
+
         # 1. Immutable input snapshot; each subsequent freeze is a phase barrier.
         freeze_world(self.world)
-        self._region_phase(Phase.NEEDS, self._calculate_needs)
-        self._region_phase(Phase.PRODUCTION, self._calculate_production)
+        region_phase(Phase.NEEDS, self._calculate_needs)
+        region_phase(Phase.PRODUCTION, self._calculate_production)
 
         # 4. Publish in parallel, then resolve centrally and deterministically.
-        offers = self._region_phase(Phase.TRADE, self._calculate_trade_offer)
+        offers = region_phase(Phase.TRADE, self._calculate_trade_offer)
         orders = (order for delta in sorted(offers, key=lambda item: item.key) for order in delta.trade_orders)
         shipments = resolve_orders(orders)
 
         # 5. Route admissibility/dispatch is independent per resolved shipment.
         transport_snapshot = freeze_world(self.world)
-        self._apply(self.scheduler.map(partial(self._calculate_shipment, transport_snapshot), shipments))
-        self._region_phase(Phase.DEMOGRAPHY, self._calculate_demography)
-        self._region_phase(Phase.INVESTMENT, self._calculate_investment)
-        self._region_phase(Phase.MAINTENANCE, self._calculate_maintenance)
-        self._region_phase(Phase.INVARIANTS, self._invariant)
+        published.extend(self._apply(
+            self.scheduler.map(partial(self._calculate_shipment, transport_snapshot), shipments)
+        ))
+        region_phase(Phase.DEMOGRAPHY, self._calculate_demography)
+        region_phase(Phase.INVESTMENT, self._calculate_investment)
+        region_phase(Phase.MAINTENANCE, self._calculate_maintenance)
+        region_phase(Phase.INVARIANTS, self._invariant)
 
         # Publication is after all barriers and retained in a bounded deque.
         self.world.tick += 1
@@ -211,6 +224,7 @@ class Simulation:
             sum(region.economy.treasury for region in self.world.regions),
             len(self.events),
         ))
+        return tuple(published)
 
     def step(self, ticks: int = 1) -> World:
         if ticks < 0:

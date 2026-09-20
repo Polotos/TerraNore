@@ -190,10 +190,9 @@ class AppState:
             region.id: (region.population, region.resources, tuple(region.economy.__dict__.values()))
             for region in self.simulation.world.regions
         }
-        before = len(self.simulation.events)
-        self.simulation.step(1)  # A tick is the atomic consistency boundary.
+        events = self.simulation._tick()  # A tick is the atomic consistency boundary.
         tick = self.simulation.world.tick
-        for offset, event in enumerate(list(self.simulation.events)[before:]):
+        for offset, event in enumerate(events):
             self.event_log.append(EventRecord(
                 id=f"event-{self.branch_id}-{tick}-{offset}", tick=tick, kind=event.kind,
                 payload=dict(event.payload),
