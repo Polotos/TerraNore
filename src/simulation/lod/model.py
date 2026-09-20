@@ -28,12 +28,31 @@ class LODMode(Enum):
 AUTO = LODMode.AUTO
 
 
+class OverflowPolicy(Enum):
+    """Where goods which do not fit in the receiving warehouse go."""
+
+    KEEP_IN_SHIPMENT = "keep_in_shipment"
+    REDIRECT = "redirect"
+    RETURN = "return"
+    DESTROY = "destroy"
+
+
+@dataclass(frozen=True)
+class ResourceEvent:
+    kind: str
+    resource: str
+    amount: float
+    reason: str
+
+
 @dataclass
 class Shipment:
     resource: str
     amount: float
     months_remaining: float
     value: float = 0.0
+    overflow_policy: OverflowPolicy = OverflowPolicy.KEEP_IN_SHIPMENT
+    redirect_to: str | None = None
 
 
 @dataclass
@@ -69,13 +88,21 @@ class AggregateState:
     construction: list[Construction] = field(default_factory=list)
     deficit: dict[str, float] = field(default_factory=dict)
     provision: dict[str, float] = field(default_factory=dict)
+    # Goods refused by a warehouse remain physically accounted for here until
+    # an external return/handling process moves them.
+    rejected_cargo: dict[str, float] = field(default_factory=dict)
+    # Cumulative, explicit resource sink.  Every increment has a matching event.
+    losses: dict[str, float] = field(default_factory=dict)
+    events: list[ResourceEvent] = field(default_factory=list)
+    production_overflow_policy: OverflowPolicy = OverflowPolicy.RETURN
     rounding: dict[str, float] = field(default_factory=dict)
 
     def resource_total(self, resource: str) -> float:
-        """Goods owned by the node, including cargo and explicit round-off."""
+        """Goods physically present, including rejected cargo and round-off."""
         cargo = sum(s.amount for s in self.shipments if s.resource == resource)
         building = sum(c.materials_spent.get(resource, 0.0) for c in self.construction)
-        return self.stocks.get(resource, 0.0) + cargo + building + self.rounding.get(resource, 0.0)
+        return (self.stocks.get(resource, 0.0) + cargo + building
+                + self.rejected_cargo.get(resource, 0.0) + self.rounding.get(resource, 0.0))
 
 
 @dataclass

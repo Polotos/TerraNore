@@ -17,13 +17,15 @@ def aggregate(children: list[SimulationNode]) -> AggregateState:
     result.population = sum(s.population for s in states)
     result.available_labour = sum(s.available_labour for s in states)
     for attr in ("production", "production_capacity", "consumption", "stocks",
-                 "stock_capacity", "imports", "exports", "deficit", "rounding"):
+                 "stock_capacity", "imports", "exports", "deficit", "rejected_cargo",
+                 "losses", "rounding"):
         target = getattr(result, attr)
         for state in states:
             for resource, amount in getattr(state, attr).items():
                 target[resource] = target.get(resource, 0.0) + amount
     result.shipments = [deepcopy(x) for s in states for x in s.shipments]
     result.construction = [deepcopy(x) for s in states for x in s.construction]
+    result.events = [deepcopy(x) for s in states for x in s.events]
     result.money = sum(s.money for s in states)
     result.capital = sum(s.capital for s in states)
     result.committed_money = sum(s.committed_money for s in states)
@@ -116,6 +118,8 @@ def _disaggregate(node: SimulationNode,
         "imports": lambda resource: trade_weights,
         "exports": lambda resource: trade_weights,
         "deficit": lambda resource: population_weights,
+        "rejected_cargo": lambda resource: trade_weights,
+        "losses": lambda resource: population_weights,
         "rounding": lambda resource: _weights(
             children, [child.state.stock_capacity.get(resource, 0.0) for child in children]
         ),

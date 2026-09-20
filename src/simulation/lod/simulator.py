@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from .model import AUTO, AggregateState, LOD, SimulationNode
+from .model import (AUTO, AggregateState, LOD, OverflowPolicy, ResourceEvent,
+                    Shipment, SimulationNode)
 from .reconciliation import balance_of, reconcile
 from .transition import aggregate
 
@@ -42,7 +43,7 @@ class LODSimulator:
                 reconcile(balance_of(parts), balance_of([SimulationNode(node.id, merged)]))
                 node.state = merged
             else:
-                self._substep(node, step)
+                self._substep(node, step, self._node_index(node))
             for resource, amount in node.state.production.items():
                 production[resource] = production.get(resource, 0.0) + amount
             remaining -= step
@@ -83,7 +84,8 @@ class LODSimulator:
 
         for attribute in (
             "production", "production_capacity", "consumption", "stocks",
-            "stock_capacity", "imports", "exports", "deficit", "rounding",
+            "stock_capacity", "imports", "exports", "deficit", "rejected_cargo",
+            "losses", "rounding",
         ):
             values = getattr(result, attribute)
             for state in excluded:
@@ -119,8 +121,51 @@ class LODSimulator:
         return result
 
     @staticmethod
-    def _substep(node: SimulationNode, months: float) -> None:
+    def _node_index(node: SimulationNode) -> dict[str, SimulationNode]:
+        result = {node.id: node}
+        for child in node.children:
+            result.update(LODSimulator._node_index(child))
+        return result
+
+    @staticmethod
+    def _record_loss(state: AggregateState, resource: str, amount: float, reason: str) -> None:
+        if amount <= 0:
+            return
+        state.losses[resource] = state.losses.get(resource, 0.0) + amount
+        state.events.append(ResourceEvent("resource-loss", resource, amount, reason))
+
+    @classmethod
+    def _handle_overflow(cls, state: AggregateState, shipment: Shipment, amount: float,
+                         nodes: dict[str, SimulationNode]) -> list[Shipment]:
+        if amount <= 1e-12:
+            return []
+        policy = shipment.overflow_policy
+        if policy is OverflowPolicy.DESTROY:
+            cls._record_loss(state, shipment.resource, amount, "warehouse-overflow")
+            return []
+        if policy is OverflowPolicy.RETURN:
+            state.rejected_cargo[shipment.resource] = state.rejected_cargo.get(shipment.resource, 0.0) + amount
+            return []
+        if policy is OverflowPolicy.REDIRECT and shipment.redirect_to in nodes:
+            target = nodes[shipment.redirect_to].state
+            capacity = target.stock_capacity.get(shipment.resource, float("inf"))
+            accepted = min(amount, max(0.0, capacity - target.stocks.get(shipment.resource, 0.0)))
+            target.stocks[shipment.resource] = target.stocks.get(shipment.resource, 0.0) + accepted
+            remainder = amount - accepted
+            if remainder <= 1e-12:
+                return []
+            # A full alternative warehouse does not make cargo disappear.
+            return [Shipment(shipment.resource, remainder, 0.0, overflow_policy=policy,
+                             redirect_to=shipment.redirect_to)]
+        # KEEP_IN_SHIPMENT is also the safe fallback for a missing redirect.
+        return [Shipment(shipment.resource, amount, 0.0, overflow_policy=policy,
+                         redirect_to=shipment.redirect_to)]
+
+    @classmethod
+    def _substep(cls, node: SimulationNode, months: float,
+                 nodes: dict[str, SimulationNode] | None = None) -> None:
         state = node.state
+        nodes = nodes or {node.id: node}
         # Arrival precedes production/consumption, so cargo due this month is usable.
         pending = []
         for shipment in state.shipments:
@@ -130,7 +175,7 @@ class LODSimulator:
                 accepted = min(shipment.amount,
                                max(0.0, capacity - state.stocks.get(shipment.resource, 0.0)))
                 state.stocks[shipment.resource] = state.stocks.get(shipment.resource, 0.0) + accepted
-                state.rounding[shipment.resource] = state.rounding.get(shipment.resource, 0.0) + shipment.amount - accepted
+                pending.extend(cls._handle_overflow(state, shipment, shipment.amount - accepted, nodes))
                 state.committed_money = max(0.0, state.committed_money - shipment.value)
             else:
                 pending.append(shipment)
@@ -148,7 +193,11 @@ class LODSimulator:
             used = min(available, wanted)
             capacity = state.stock_capacity.get(resource, float("inf"))
             state.stocks[resource] = min(capacity, available - used)
-            state.rounding[resource] = state.rounding.get(resource, 0.0) + max(0.0, available - used - capacity)
+            overflow = max(0.0, available - used - capacity)
+            if overflow:
+                synthetic = Shipment(resource, overflow, 0.0,
+                                     overflow_policy=state.production_overflow_policy)
+                state.shipments.extend(cls._handle_overflow(state, synthetic, overflow, nodes))
             shortage = wanted - used
             state.deficit[resource] = state.deficit.get(resource, 0.0) + shortage
             state.provision[resource] = 1.0 if wanted == 0 else used / wanted
