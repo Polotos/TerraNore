@@ -80,6 +80,36 @@ class LODTests(unittest.TestCase):
         self.assertEqual(parent.state.stocks["food"], 116)
         self.assertEqual(parent.state.money, 100)
 
+    def test_coarse_ticks_are_distributed_before_detail_is_reactivated(self):
+        first = SimulationNode("a", state(20, 80, 40, 0.5), LOD.ENTERPRISE)
+        second = SimulationNode("b", state(30, 120, 60, 1.0), LOD.ENTERPRISE)
+        first.state.capital, second.state.capital = 1, 3
+        first.state.production_capacity["food"] = 5
+        second.state.production_capacity["food"] = 15
+        first.state.consumption["food"] = second.state.consumption["food"] = 2
+        parent = SimulationNode("world", children=[second, first], native_lod=LOD.ENTERPRISE)
+
+        change_lod(parent, LOD.AGGREGATE)
+        saved_food = [first.state.stocks["food"], second.state.stocks["food"]]
+        LODSimulator().advance(parent, 3, LOD.AGGREGATE)
+        parent.state.population += 10
+        parent.state.available_labour += 10
+        parent.state.money += 80
+        parent.state.construction.append(Construction("new-orchard", 4, {"food": 6}))
+        coarse_balance = balance_of([parent])
+
+        change_lod(parent, LOD.ENTERPRISE)
+
+        self.assertTrue(all(child.active for child in parent.children))
+        self.assertEqual([first.state.population, second.state.population], [24, 36])
+        self.assertEqual([first.state.money, second.state.money], [60, 120])
+        self.assertNotEqual([first.state.stocks["food"], second.state.stocks["food"]], saved_food)
+        self.assertEqual(sum(len(child.state.construction) for child in parent.children), 1)
+        buffered_nodes = parent.children + [
+            SimulationNode("buffer", parent.reconciliation_buffer)
+        ]
+        self.assertEqual(coarse_balance, balance_of(buffered_nodes))
+
 
 if __name__ == "__main__":
     unittest.main()

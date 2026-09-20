@@ -20,6 +20,7 @@ class Balance:
     resources: dict[str, float]
     population: float
     money: float
+    capital: float
     production_capacity: dict[str, float]
     infrastructure: float
     shipments: dict[str, float]
@@ -47,6 +48,7 @@ def balance_of(nodes: list[SimulationNode]) -> Balance:
         sum(s.infrastructure * s.population for s in states) / population if population else 0.0
     )
     return Balance(resources, population, sum(s.money for s in states),
+                   sum(s.capital for s in states),
                    _sum_maps(states, "production_capacity"), infrastructure,
                    shipments, materials)
 
@@ -56,7 +58,7 @@ def reconcile(before: Balance, after: Balance, tolerance: float = 1e-9) -> None:
     def close(left: float, right: float) -> bool:
         return abs(left - right) <= tolerance * max(1.0, abs(left), abs(right))
 
-    for name in ("population", "money", "infrastructure"):
+    for name in ("population", "money", "capital", "infrastructure"):
         if not close(getattr(before, name), getattr(after, name)):
             raise ValueError(f"LOD reconciliation failed for {name}")
     for name in ("resources", "production_capacity", "shipments", "construction_materials"):

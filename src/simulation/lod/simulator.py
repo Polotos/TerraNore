@@ -75,7 +75,7 @@ class LODSimulator:
         weighted_infrastructure -= sum(state.infrastructure * state.population for state in excluded)
 
         for attribute in (
-            "population", "available_labour", "money", "committed_money",
+            "population", "available_labour", "money", "capital", "committed_money",
             "transport_capacity", "transport_load",
         ):
             value = getattr(result, attribute) - sum(getattr(state, attribute) for state in excluded)

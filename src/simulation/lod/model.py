@@ -59,6 +59,9 @@ class AggregateState:
     exports: dict[str, float] = field(default_factory=dict)
     shipments: list[Shipment] = field(default_factory=list)
     money: float = 0.0
+    # Productive/financial capital is distinct from liquid money and is used as
+    # the default ownership key when an aggregate cash balance is split again.
+    capital: float = 0.0
     committed_money: float = 0.0
     transport_capacity: float = 0.0
     transport_load: float = 0.0
@@ -89,6 +92,10 @@ class SimulationNode:
     lod_override: LOD | LODMode = AUTO
     children: list["SimulationNode"] = field(default_factory=list)
     active: bool = True
+    # Numerical crumbs which cannot be represented by the child allocations.
+    # This belongs to the parent even while its children are active and must
+    # therefore never be advanced as an economic entity.
+    reconciliation_buffer: AggregateState = field(default_factory=AggregateState)
 
     def effective_lod(self, inherited: LOD = LOD.AGGREGATE) -> LOD:
         if self.lod_override is not AUTO:
