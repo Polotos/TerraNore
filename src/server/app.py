@@ -611,9 +611,15 @@ class TestRequestHandler(BaseHTTPRequestHandler):
             series = self.app.object_series[object_id]
         elif metric == "production":
             raise ApiError(400, "production requires objectId")
-        points = [deepcopy(p) for p in series.points if start <= p["tick"] <= end][:limit]
+        points = [deepcopy(p) for p in series.between(start, end)][:limit]
         if metric:
-            points = [{"tick": point["tick"], metric: point[metric]} for point in points]
+            points = [
+                ({"tick": point["tick"], metric: point[metric]} if "tick" in point else {
+                    "start_tick": point["start_tick"], "end_tick": point["end_tick"],
+                    "count": point["count"], "metrics": {metric: point["metrics"][metric]},
+                })
+                for point in points
+            ]
         return {"revision": self.app.revision, "items": points}
 
     def _compare(self, left: int, right: int) -> dict:

@@ -43,6 +43,41 @@ class PersistenceTests(unittest.TestCase):
         self.assertTrue(all(tick in ticks for tick in (34, 35, 36)))
         self.assertEqual(set(series.metadata), {"population", "treasury"})
 
+    def test_quarter_bucket_preserves_a_short_shortage_as_period_minimum(self):
+        metadata = {
+            "stocks": {"name": "Stocks", "unit": "goods", "aggregation": "snapshot"},
+            "population": {"name": "Population", "unit": "people", "aggregation": "snapshot"},
+            "production": {"name": "Production", "unit": "goods", "aggregation": "sum"},
+        }
+        series = TimeSeries(
+            HistoryPolicy(full_months=0, monthly_years=0, quarterly_years=2),
+            metadata=metadata,
+        )
+        # The one-month shortage is not on either quarterly boundary.
+        for tick, stock in enumerate((100, 4, 100)):
+            series.append(tick, {"stocks": stock, "population": 50, "production": 10})
+        series.compact(30)
+
+        bucket = series.buckets[0]
+        self.assertEqual((bucket["start_tick"], bucket["end_tick"], bucket["count"]), (0, 2, 3))
+        self.assertEqual(bucket["metrics"]["stocks"], {
+            "first": 100, "last": 100, "min": 4, "max": 100,
+            "average": 68.0, "value": 100,
+        })
+        self.assertEqual(bucket["metrics"]["production"]["sum"], 30)
+        self.assertEqual(bucket["metrics"]["production"]["value"], 30)
+
+    def test_pinned_and_significant_samples_are_not_bucketed(self):
+        series = TimeSeries(HistoryPolicy(0, 0, 2))
+        for tick in range(6):
+            series.append(tick, {"population": tick, "treasury": tick})
+        series.pin_interval(1, 2)
+        series.mark_significant(4)
+        series.compact(30)
+
+        self.assertEqual([point["tick"] for point in series.points], [1, 2, 4])
+        self.assertTrue(all(bucket["start_tick"] not in {1, 2, 4} for bucket in series.buckets))
+
     def test_event_journal_keeps_significant_dates_and_causal_chain(self):
         journal = EventLog()
         journal.append(EventRecord("cause", 3, "route-changed", object_id="route-1"))
