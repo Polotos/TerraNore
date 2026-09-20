@@ -82,8 +82,15 @@ class ServerOperationTests(unittest.TestCase):
 
     def test_task_pause_resume_cancel_and_queries(self):
         created = self.post("/simulation/run", {"targetTick": 100})["task"]
+        self.assertIsInstance(created["completed"], int)
+        active = self.get("/state")["activeTask"]
+        self.assertEqual(active["id"], created["id"])
+        self.assertEqual(active["cancellationToken"], created["cancellationToken"])
         paused = self.post("/simulation/pause", {"taskId": created["id"]})["task"]
         self.assertEqual(paused["status"], "paused")
+        with self.assertRaises(HTTPError) as error:
+            self.post("/simulation/step", {"ticks": 1})
+        self.assertEqual(error.exception.code, 409)
         resumed = self.post("/simulation/resume", {"taskId": created["id"]})["task"]
         self.assertIn(resumed["status"], ("paused", "running"))
         cancelled = self.post("/simulation/cancel", {

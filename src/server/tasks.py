@@ -29,6 +29,7 @@ class SimulationTask:
             self.id,
             self.kind,
             self.status,
+            self.completed,
             round(progress, 6),
             self.cancellation_token,
             self.start_tick,

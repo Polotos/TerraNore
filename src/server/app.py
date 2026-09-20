@@ -111,6 +111,8 @@ class AppState:
 
     def step(self, ticks: int) -> None:
         self._assert_writable()
+        if self.active_task_id and self.tasks[self.active_task_id].status in ("queued", "running", "paused"):
+            raise ApiError(409, "a simulation task is active")
         if ticks < 0:
             raise ApiError(400, "period must be non-negative")
         for _ in range(ticks):
@@ -118,9 +120,15 @@ class AppState:
 
     def payload(self) -> dict:
         world = self.simulation.world
+        active_task = None
+        if self.active_task_id:
+            task = self.tasks[self.active_task_id]
+            if task.status in ("queued", "running", "paused"):
+                active_task = task.dto().to_dict()
         return {
             "product": "TerraNore Test", "saveFormat": FORMAT, "revision": self.revision,
             "readOnly": self.read_only, "branchId": self.branch_id,
+            "activeTask": active_task,
             "world": WorldDTO.from_world(world, self.simulation.scheduler.workers).to_dict(),
             "summary": {
                 "year": world.tick // Simulation.TICKS_PER_YEAR,

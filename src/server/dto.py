@@ -81,6 +81,7 @@ class TaskDTO:
     id: str
     kind: str
     status: str
+    completed: int
     progress: float
     cancellation_token: str
     start_tick: int
