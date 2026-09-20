@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 from src.simulation.model import World
+from src.simulation.lod import external_lod
 
 
 @dataclass(frozen=True)
@@ -48,7 +49,7 @@ class WorldDTO:
                         region.economy.consumption,
                         region.economy.price_index,
                     ),
-                    region.detail_level,
+                    external_lod(world.simulation_node(region.id)),
                 )
                 for region in world.regions
             ),

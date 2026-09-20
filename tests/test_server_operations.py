@@ -42,18 +42,36 @@ class ServerOperationTests(unittest.TestCase):
         self.assertEqual(len(children["items"]), 4)
         card = self.get("/objects/region-1")
         self.assertEqual(card["object"]["id"], "region-1")
-        changed = self.post("/objects/region-1/lod", {"level": "detailed"})
+        changed = self.post("/objects/region-1/lod", {"level": "lod-2"})
         self.assertGreater(changed["revision"], revision)
+        self.assertEqual(changed["world"]["regions"][0]["detail_level"], "lod-2")
 
         with self.assertRaises(HTTPError) as error:
             self.get("/timeseries", **{"from": 0, "to": 10001})
         self.assertEqual(error.exception.code, 413)
         with self.assertRaises(HTTPError) as error:
-            self.post("/lod", {"regionId": "missing", "level": "summary"})
+            self.post("/lod", {"regionId": "missing", "level": "lod-0"})
         self.assertEqual(error.exception.code, 404)
         with self.assertRaises(HTTPError) as error:
             self.post("/lod", {"regionId": "region-1", "level": "ultra"})
         self.assertEqual(error.exception.code, 400)
+        self.assertEqual(self.get("/state")["revision"], changed["revision"])
+
+    def test_equal_period_results_survive_real_lod_transition_over_http(self):
+        baseline = self.post("/simulation/step", {"ticks": 6})
+        expected = {
+            "population": baseline["summary"]["population"],
+            "treasury": baseline["summary"]["treasury"],
+            "production": baseline["summary"]["production"],
+        }
+
+        self.post("/reset", {"seed": 42})
+        before = self.get("/state")["revision"]
+        changed = self.post("/objects/region-1/lod", {"level": "lod-2"})
+        self.assertEqual(changed["world"]["regions"][0]["detail_level"], "lod-2")
+        self.assertEqual(changed["revision"], before + 1)
+        actual = self.post("/simulation/step", {"ticks": 6})
+        self.assertEqual(actual["summary"], {**expected, "year": 0, "month": 7})
 
     def test_task_pause_resume_cancel_and_queries(self):
         created = self.post("/simulation/run", {"targetTick": 100})["task"]
