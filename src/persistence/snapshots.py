@@ -8,6 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from src.simulation.model import Economy, Region, SimulationDate, World
 
@@ -39,6 +40,7 @@ def clone_world(world: World) -> World:
 @dataclass(frozen=True)
 class Snapshot:
     id: str
+    world_id: str
     tick: int
     blob_id: str
     branch_id: str
@@ -53,6 +55,7 @@ class SnapshotStore:
         if interval is not None and interval < 1:
             raise ValueError("snapshot interval must be positive")
         self.interval = interval
+        self.world_id = str(uuid4())
         self._blobs: dict[str, dict] = {}
         self.snapshots: dict[str, Snapshot] = {}
         self.branches: dict[str, str] = {"main": ""}
@@ -67,7 +70,10 @@ class SnapshotStore:
         encoded = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
         blob_id = hashlib.sha256(encoded).hexdigest()
         self._blobs.setdefault(blob_id, data)  # identical worlds share storage
-        snapshot = Snapshot(identifier, world.tick, blob_id, branch_id, reason, datetime.now(timezone.utc).isoformat())
+        snapshot = Snapshot(
+            identifier, self.world_id, world.tick, blob_id, branch_id, reason,
+            datetime.now(timezone.utc).isoformat(),
+        )
         self.snapshots[identifier] = snapshot
         self.branches[branch_id] = identifier
         return snapshot
@@ -82,6 +88,8 @@ class SnapshotStore:
 
     def open(self, snapshot_id: str) -> World:
         snapshot = self.snapshots[snapshot_id]
+        if snapshot.world_id != self.world_id:
+            raise ValueError("snapshot belongs to another world")
         data = self._blobs[snapshot.blob_id]
         return clone_world(_world_from_dict(data))
 
