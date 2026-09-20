@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from src.persistence import FORMAT, TimeSeries, load_snapshot, save_snapshot
+from src.persistence import EventLog, EventRecord, FORMAT, SnapshotStore, TimeSeries, load_snapshot, save_snapshot
 from src.simulation import Simulation
 from src.simulation.lod import DetailSelector
 from src.simulation.model import Economy, Region, World
@@ -37,8 +37,10 @@ def _clone_world(world: World) -> World:
 
 
 class AppState:
-    def __init__(self, seed: int = 42) -> None:
+    def __init__(self, seed: int = 42, snapshot_interval: int | None = None) -> None:
         self.simulation = Simulation(seed)
+        self.branch_id = "main"
+        self.snapshot_store = SnapshotStore(self.simulation.world, interval=snapshot_interval)
         self.series = TimeSeries()
         self.series.capture(self.simulation.world)
         self.lock = threading.RLock()
@@ -46,8 +48,7 @@ class AppState:
         self.read_only = False
         self.tasks: dict[str, SimulationTask] = {}
         self.active_task_id: str | None = None
-        self.snapshots: dict[str, World] = {}
-        self.event_log: list[dict] = []
+        self.event_log = EventLog()
 
     def _assert_writable(self) -> None:
         if self.read_only:
@@ -58,11 +59,13 @@ class AppState:
         self.simulation.step(1)  # A tick is the atomic consistency boundary.
         tick = self.simulation.world.tick
         for offset, event in enumerate(list(self.simulation.events)[before:]):
-            self.event_log.append({
-                "id": f"event-{tick}-{offset}", "tick": tick, "kind": event.kind,
-                "payload": dict(event.payload), "causes": [],
-            })
+            self.event_log.append(EventRecord(
+                id=f"event-{self.branch_id}-{tick}-{offset}", tick=tick, kind=event.kind,
+                payload=dict(event.payload),
+            ))
         self.series.capture(self.simulation.world)
+        self.snapshot_store.create_if_due(self.simulation.world, branch_id=self.branch_id)
+        self.series.compact(tick)
         self.revision += 1
 
     def step(self, ticks: int) -> None:
@@ -76,7 +79,8 @@ class AppState:
         world = self.simulation.world
         return {
             "product": "TerraNore Test", "saveFormat": FORMAT, "revision": self.revision,
-            "readOnly": self.read_only, "world": WorldDTO.from_world(world).to_dict(),
+            "readOnly": self.read_only, "branchId": self.branch_id,
+            "world": WorldDTO.from_world(world).to_dict(),
             "summary": {
                 "year": world.tick // Simulation.TICKS_PER_YEAR,
                 "month": world.tick % Simulation.TICKS_PER_YEAR + 1,
@@ -158,14 +162,15 @@ class AppState:
             task.status = "cancelled"
         return task
 
-    def replace_world(self, world: World, *, read_only: bool = False) -> None:
+    def replace_world(self, world: World, *, read_only: bool = False, branch_id: str = "main") -> None:
         if self.active_task_id and self.tasks[self.active_task_id].status in ("queued", "running", "paused"):
             raise ApiError(409, "a simulation task is active")
         self.simulation.close()
         self.simulation = Simulation(world=world)
         self.series = TimeSeries()
         self.series.capture(world)
-        self.event_log = []
+        self.event_log = EventLog()
+        self.branch_id = branch_id
         self.read_only = read_only
         self.revision += 1
 
@@ -233,13 +238,14 @@ class TestRequestHandler(BaseHTTPRequestHandler):
             return self._compare(left, right)
         if path == f"{API}/events":
             start, end = self._range(query)
-            return {"revision": self.app.revision, "items": deepcopy([e for e in self.app.event_log if start <= e["tick"] <= end])}
+            return {"revision": self.app.revision, "items": self.app.event_log.between(start, end)}
         if path.startswith(f"{API}/events/") and path.endswith("/causes"):
             event_id = path[len(f"{API}/events/"):-len("/causes")].strip("/")
-            event = next((event for event in self.app.event_log if event["id"] == event_id), None)
+            event = self.app.event_log.get(event_id)
             if event is None:
                 raise ApiError(404, "unknown event")
-            return {"revision": self.app.revision, "event": deepcopy(event), "chain": deepcopy(event["causes"])}
+            return {"revision": self.app.revision, "event": event.to_dict(),
+                    "chain": self.app.event_log.causal_chain(event_id)}
         if path == f"{API}/anomalies":
             start, end = self._range(query)
             points = [p for p in self.app.series.points if start <= p["tick"] <= end]
@@ -289,15 +295,30 @@ class TestRequestHandler(BaseHTTPRequestHandler):
             object_id = path[len(f"{API}/objects/"):-len("/lod")].strip("/")
             return self._set_lod(object_id, data["level"])
         if path == f"{API}/snapshots":
-            snapshot_id = str(data.get("id") or f"snapshot-{len(self.app.snapshots) + 1}")
-            self.app.snapshots[snapshot_id] = _clone_world(self.app.simulation.world)
-            return 201, {"revision": self.app.revision, "snapshot": {"id": snapshot_id, "tick": self.app.simulation.world.tick}}
+            snapshot_id = data.get("id")
+            snapshot = self.app.snapshot_store.create(
+                self.app.simulation.world, snapshot_id=str(snapshot_id) if snapshot_id else None,
+                branch_id=self.app.branch_id,
+            )
+            return 201, {"revision": self.app.revision, "snapshot": {"id": snapshot.id, "tick": snapshot.tick}}
         if path.startswith(f"{API}/snapshots/") and path.endswith("/open"):
             snapshot_id = path[len(f"{API}/snapshots/"):-len("/open")].strip("/")
-            if snapshot_id not in self.app.snapshots:
+            if snapshot_id not in self.app.snapshot_store.snapshots:
                 raise ApiError(404, "unknown snapshot")
-            self.app.replace_world(_clone_world(self.app.snapshots[snapshot_id]), read_only=True)
+            self.app.replace_world(self.app.snapshot_store.open(snapshot_id), read_only=True,
+                                   branch_id=self.app.snapshot_store.snapshots[snapshot_id].branch_id)
             return 200, self.app.payload()
+        if path.startswith(f"{API}/snapshots/") and path.endswith("/branch"):
+            snapshot_id = path[len(f"{API}/snapshots/"):-len("/branch")].strip("/")
+            if snapshot_id not in self.app.snapshot_store.snapshots:
+                raise ApiError(404, "unknown snapshot")
+            branch_id = str(data.get("branchId", "")).strip()
+            try:
+                world = self.app.snapshot_store.branch(snapshot_id, branch_id)
+            except ValueError as error:
+                raise ApiError(409, str(error)) from None
+            self.app.replace_world(world, branch_id=branch_id)
+            return 201, self.app.payload()
         if path == f"{API}/save":
             target = data.get("path")
             if not target:
@@ -420,10 +441,11 @@ class TestRequestHandler(BaseHTTPRequestHandler):
         print(f"[TerraNore Test] {self.address_string()} - {format % args}")
 
 
-def create_server(host: str = "127.0.0.1", port: int = 0, seed: int = 42) -> ThreadingHTTPServer:
+def create_server(host: str = "127.0.0.1", port: int = 0, seed: int = 42,
+                  snapshot_interval: int | None = None) -> ThreadingHTTPServer:
     # Refuse an accidental public bind: this API controls local files and worlds.
     if host not in ("127.0.0.1", "::1", "localhost"):
         raise ValueError("the test API may only bind to a loopback interface")
     server = ThreadingHTTPServer((host, port), TestRequestHandler)
-    server.app = AppState(seed)  # type: ignore[attr-defined]
+    server.app = AppState(seed, snapshot_interval)  # type: ignore[attr-defined]
     return server

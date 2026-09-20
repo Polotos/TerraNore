@@ -62,5 +62,8 @@ python -m src.simulation --years 100 --seed 42 --workers auto
 * `src/simulation/workers/` — детерминированный планировщик;
 * `src/server/` — локальный API;
 * `src/ui/` — браузерный интерфейс;
-* `src/persistence/` — снимки и временные ряды;
+* `src/persistence/` — раздельные оперативное состояние, copy-on-write снимки,
+  многоуровневые временные ряды и постоянный журнал событий. Снимок открывается
+  только для чтения; продолжение от него создаётся запросом
+  `POST /snapshots/{id}/branch` с новым `branchId`;
 * `tests/` и `BUILD/` — проверки и команды запуска.
