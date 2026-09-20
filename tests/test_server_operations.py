@@ -144,6 +144,18 @@ class ServerOperationTests(unittest.TestCase):
                 if operation != "cancel":
                     self.post("/simulation/cancel", credentials)
 
+    def test_timeseries_returns_compacted_buckets(self):
+        # Use the synchronous operation so the assertion cannot race a run task.
+        self.post("/simulation/step", {"ticks": 130})
+        payload = self.get(
+            "/timeseries", **{"from": 0, "to": 10, "objectId": "region-1", "metric": "production"}
+        )
+
+        self.assertTrue(payload["items"])
+        bucket = payload["items"][0]
+        self.assertEqual(set(bucket), {"start_tick", "end_tick", "count", "metrics"})
+        self.assertIn("sum", bucket["metrics"]["production"])
+
     def test_snapshots_and_save_load(self):
         snapshot = self.post("/snapshots")["snapshot"]
         opened = self.post(f"/snapshots/{snapshot['id']}/open")
