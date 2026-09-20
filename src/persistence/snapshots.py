@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
+import tempfile
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -87,7 +89,21 @@ class SnapshotStore:
 
 def save_snapshot(world: World, path: str | Path) -> None:
     payload = {"format": FORMAT, "world": world.to_dict()}
-    Path(path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def load_snapshot(path: str | Path) -> World:

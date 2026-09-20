@@ -2,7 +2,6 @@ import json
 import tempfile
 import threading
 import unittest
-from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -12,7 +11,8 @@ from src.server import create_server
 
 class ServerOperationTests(unittest.TestCase):
     def setUp(self):
-        self.server = create_server()
+        self.saves = tempfile.TemporaryDirectory()
+        self.server = create_server(saves_dir=self.saves.name)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}/api/test/v1"
@@ -21,6 +21,7 @@ class ServerOperationTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join()
+        self.saves.cleanup()
 
     def post(self, path, data=None):
         request = Request(
@@ -151,11 +152,22 @@ class ServerOperationTests(unittest.TestCase):
             self.post("/simulation/step")
         self.assertEqual(error.exception.code, 409)
 
-        with tempfile.TemporaryDirectory() as directory:
-            path = str(Path(directory) / "world.json")
-            self.post("/save", {"path": path})
-            loaded = self.post("/load", {"path": path})
+        saved = self.post("/save", {"name": "campaign/world.json"})
+        self.assertEqual(saved["name"], "campaign/world.json")
+        loaded = self.post("/load", {"name": "campaign/world.json"})
         self.assertFalse(loaded["readOnly"])
+
+    def test_save_paths_are_confined_and_developer_import_is_opt_in(self):
+        for name in ("../outside.json", "..\\outside.json", "/tmp/outside.json", "C:\\outside.json"):
+            with self.subTest(name=name), self.assertRaises(HTTPError) as error:
+                self.post("/save", {"name": name})
+            self.assertEqual(error.exception.code, 400)
+        with self.assertRaises(HTTPError) as error:
+            self.post("/save", {"path": "legacy.json"})
+        self.assertEqual(error.exception.code, 400)
+        with self.assertRaises(HTTPError) as error:
+            self.post("/developer/import", {"path": "/tmp/external.json"})
+        self.assertEqual(error.exception.code, 404)
 
     def test_snapshot_continuation_requires_named_branch(self):
         snapshot = self.post("/snapshots", {"id": "fork-point"})["snapshot"]
