@@ -54,6 +54,12 @@ class WorkerPipelineTests(unittest.TestCase):
         self.assertEqual(3, len(simulation.history))
         self.assertLessEqual(len(simulation.events), 2)
 
+    def test_tick_returns_all_events_when_bounded_history_overflows(self):
+        simulation = Simulation(seed=8, workers=1, event_limit=1)
+        event_counts = [len(simulation._tick()) for _ in range(8)]
+        self.assertTrue(all(count > 1 for count in event_counts))
+        self.assertEqual(1, len(simulation.events))
+
     def test_worker_configuration_validation(self):
         self.assertGreaterEqual(DeterministicScheduler("auto").workers, 1)
         self.assertEqual(3, DeterministicScheduler("3").workers)

@@ -5,6 +5,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from src.server import create_server
+from src.simulation import Simulation
 
 
 class ServerTests(unittest.TestCase):
@@ -58,3 +59,14 @@ class ServerTests(unittest.TestCase):
         with self.assertRaises(HTTPError) as raised:
             urlopen(request, timeout=2)
         self.assertEqual(raised.exception.code, 400)
+
+    def test_event_log_keeps_receiving_events_after_bounded_buffer_overflows(self):
+        self.server.app.simulation.close()
+        self.server.app.simulation = Simulation(seed=8, workers=1, event_limit=1)
+
+        self.server.app.step(8)
+
+        records = self.server.app.event_log.records
+        self.assertGreater(len(records), 8)
+        self.assertEqual(8, records[-1].tick)
+        self.assertEqual(1, len(self.server.app.simulation.events))
