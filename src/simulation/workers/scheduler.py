@@ -44,6 +44,19 @@ class DeterministicScheduler:
             self._pool.shutdown()
             self._pool = None
 
+    @property
+    def worker_pids(self) -> list[int]:
+        """Return live executor PIDs for diagnostics, never for task control."""
+        if self._pool is None:
+            return []
+        # ProcessPoolExecutor has no public process-introspection API. Snapshot
+        # its process table defensively: it can change while the pool starts.
+        processes = tuple((getattr(self._pool, "_processes", None) or {}).values())
+        return sorted(
+            process.pid for process in processes
+            if process.pid is not None and process.is_alive()
+        )
+
     def __enter__(self) -> DeterministicScheduler:
         return self
 

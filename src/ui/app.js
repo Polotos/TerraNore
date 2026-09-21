@@ -61,6 +61,13 @@ function renderState(data, force = false) {
   $('#startDate').value = data.world.startDate;
   $('#accuracy').value = data.world.accuracyProfile;
   $('#workers').value = String(data.world.workers);
+  const diagnostics = data.diagnostics || {};
+  const workerPids = diagnostics.workerPids || [];
+  setText('#workerUsage',
+    `${diagnostics.actualWorkers ?? 0} / ${data.world.workers} · ` +
+    `server PID ${diagnostics.serverPid ?? '—'} · ` +
+    `worker PID ${workerPids.length ? workerPids.join(', ') : '—'} · ` +
+    `group ${diagnostics.processGroupId ?? '—'}`);
   refreshExplorer();
 }
 
@@ -135,8 +142,13 @@ function paintProgress(task) {
   const elapsed = Math.max(.1, (performance.now() - run.started) / 1000);
   const speed = Math.round(completed / elapsed); setText('#speed', `${speed} тиков/с`);
   setText('#queue', Math.max(0, total - completed));
+  const diagnostics = state?.diagnostics || {};
   const workers = state?.world?.workers || 1;
-  setText('#workerUsage', `${run.active ? workers : 0} / ${workers}`);
+  const workerPids = diagnostics.workerPids || [];
+  setText('#workerUsage', `${diagnostics.actualWorkers ?? 0} / ${workers} · ` +
+    `server PID ${diagnostics.serverPid ?? '—'} · ` +
+    `worker PID ${workerPids.length ? workerPids.join(', ') : '—'} · ` +
+    `group ${diagnostics.processGroupId ?? '—'}`);
   setText('#eta', speed ? `${Math.ceil((total - completed) / speed)} с` : '—');
 }
 

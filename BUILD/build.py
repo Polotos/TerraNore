@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import compileall
+import os
 import py_compile
 import shutil
 import subprocess
@@ -176,8 +177,16 @@ def main() -> int:
                 command.append("--no-browser")
             log("Локальный сервер подготовлен; запуск на loopback-интерфейсе", stream)
             server_log = output / "logs" / "server.log"
+            environment = os.environ.copy()
+            # build.exe makes this build.py process the Windows console-process
+            # group leader.  The value is diagnostic only; task control keeps
+            # using its independently generated cancellation token.
+            environment["TERRANORE_PROCESS_GROUP_ID"] = str(os.getpid())
             with server_log.open("a", encoding="utf-8") as server_stream:
-                return subprocess.call(command, cwd=output, stdout=server_stream, stderr=subprocess.STDOUT)
+                return subprocess.call(
+                    command, cwd=output, stdout=server_stream,
+                    stderr=subprocess.STDOUT, env=environment,
+                )
     except (BuildFailure, OSError, subprocess.SubprocessError) as error:
         print(f"ОШИБКА СБОРКИ: {error}", file=sys.stderr)
         return 1
