@@ -194,13 +194,21 @@ class ServerOperationTests(unittest.TestCase):
         self.assertEqual(advanced["world"]["tick"], snapshot["tick"] + 1)
 
     def test_reset_starts_a_new_snapshot_store(self):
-        snapshot = self.post("/snapshots", {"id": "world-a"})["snapshot"]
+        stale = self.post("/snapshots", {"id": "world-a"})["snapshot"]
 
         self.post("/reset", {"seed": 99})
+        current = self.post("/snapshots", {"id": "world-a"})["snapshot"]
+
+        self.assertNotEqual(stale["id"], current["id"])
 
         with self.assertRaises(HTTPError) as error:
-            self.post(f"/snapshots/{snapshot['id']}/open")
-        self.assertEqual(error.exception.code, 404)
+            self.post(f"/snapshots/{stale['id']}/open")
+        self.assertEqual(error.exception.code, 409)
+        with self.assertRaises(HTTPError) as error:
+            self.post(f"/snapshots/{stale['id']}/branch", {"branchId": "stale-world"})
+        self.assertEqual(error.exception.code, 409)
+        opened = self.post(f"/snapshots/{current['id']}/open")
+        self.assertEqual(opened["world"]["seed"], 99)
 
     def test_non_loopback_bind_is_rejected(self):
         with self.assertRaises(ValueError):
