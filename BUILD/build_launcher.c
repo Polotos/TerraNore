@@ -1,27 +1,118 @@
 /* Native Windows launcher for build.py. No CRT or third-party runtime is used. */
 #include <windows.h>
+#include <shellapi.h>
+
+static BOOL append_character(wchar_t **cursor, SIZE_T *remaining, wchar_t value) {
+    if (*remaining <= 1) return FALSE;
+    *(*cursor)++ = value;
+    --*remaining;
+    return TRUE;
+}
+
+/* Quote one argv element using the inverse of CommandLineToArgvW's rules. */
+static BOOL append_argument(wchar_t **cursor, SIZE_T *remaining, const wchar_t *argument) {
+    SIZE_T backslashes = 0;
+
+    if (!append_character(cursor, remaining, L'"')) return FALSE;
+    while (*argument) {
+        if (*argument == L'\\') {
+            ++backslashes;
+            ++argument;
+            continue;
+        }
+        if (*argument == L'"') {
+            /* Backslashes before a quote are doubled, then the quote is escaped. */
+            while (backslashes > 0) {
+                --backslashes;
+                if (!append_character(cursor, remaining, L'\\') ||
+                    !append_character(cursor, remaining, L'\\')) return FALSE;
+            }
+            if (!append_character(cursor, remaining, L'\\') ||
+                !append_character(cursor, remaining, L'"')) return FALSE;
+        } else {
+            while (backslashes > 0) {
+                --backslashes;
+                if (!append_character(cursor, remaining, L'\\')) return FALSE;
+            }
+            if (!append_character(cursor, remaining, *argument)) return FALSE;
+        }
+        backslashes = 0;
+        ++argument;
+    }
+    /* Backslashes immediately before the closing quote must also be doubled. */
+    while (backslashes > 0) {
+        --backslashes;
+        if (!append_character(cursor, remaining, L'\\') ||
+            !append_character(cursor, remaining, L'\\')) return FALSE;
+    }
+    return append_character(cursor, remaining, L'"');
+}
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR ignored, int show) {
-    wchar_t executable[32768], command[65536];
-    wchar_t *slash;
+    wchar_t executable[32768], script[32768], *slash, *command, *cursor;
+    wchar_t **arguments;
+    int argument_count, index;
+    /* CreateProcessW accepts at most 32,767 characters including the NUL. */
+    SIZE_T remaining = 32767;
+    DWORD executable_length;
     STARTUPINFOW startup = { sizeof(startup) };
     PROCESS_INFORMATION process;
     DWORD code = 1;
     (void)instance; (void)previous; (void)ignored; (void)show;
-    if (!GetModuleFileNameW(NULL, executable, 32768)) return 2;
+
+    arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
+    if (!arguments || argument_count < 1) return 2;
+    executable_length = GetModuleFileNameW(NULL, executable, 32768);
+    if (!executable_length || executable_length >= 32768) {
+        LocalFree(arguments);
+        return 2;
+    }
     slash = executable + lstrlenW(executable);
-    while (slash > executable && slash[-1] != L'\\') --slash;
+    while (slash > executable && slash[-1] != L'\\' && slash[-1] != L'/') --slash;
     *slash = L'\0';
-    if (wsprintfW(command, L"py -3 \"%sbuild.py\"", executable) <= 0) return 3;
+    if (lstrlenW(executable) + 9 >= 32768) {
+        LocalFree(arguments);
+        return 3;
+    }
+    lstrcpyW(script, executable);
+    lstrcatW(script, L"build.py");
+
+    command = (wchar_t *)LocalAlloc(LMEM_FIXED, remaining * sizeof(wchar_t));
+    if (!command) {
+        LocalFree(arguments);
+        return 3;
+    }
+    cursor = command;
+    if (!append_argument(&cursor, &remaining, L"py") ||
+        !append_character(&cursor, &remaining, L' ') ||
+        !append_argument(&cursor, &remaining, L"-3") ||
+        !append_character(&cursor, &remaining, L' ') ||
+        !append_argument(&cursor, &remaining, script)) goto command_too_long;
+    for (index = 1; index < argument_count; ++index) {
+        if (!append_character(&cursor, &remaining, L' ') ||
+            !append_argument(&cursor, &remaining, arguments[index])) goto command_too_long;
+    }
+    *cursor = L'\0';
+    LocalFree(arguments);
+
     if (!CreateProcessW(NULL, command, NULL, NULL, TRUE, 0, NULL, executable,
                         &startup, &process)) {
+        LocalFree(command);
         MessageBoxW(NULL, L"Python 3 не найден. Установите Python 3.10 или новее.",
                     L"TerraNore: ошибка сборки", MB_OK | MB_ICONERROR);
         return 4;
     }
+    LocalFree(command);
     WaitForSingleObject(process.hProcess, INFINITE);
     GetExitCodeProcess(process.hProcess, &code);
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
     return (int)code;
+
+command_too_long:
+    LocalFree(command);
+    LocalFree(arguments);
+    MessageBoxW(NULL, L"Командная строка слишком длинная.",
+                L"TerraNore: ошибка сборки", MB_OK | MB_ICONERROR);
+    return 3;
 }
