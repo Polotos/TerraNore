@@ -56,6 +56,8 @@ class PersistenceTests(unittest.TestCase):
         world = Simulation(seed=2).world
         store = SnapshotStore(world, interval=2)
         manual = store.create(world, snapshot_id="manual")
+        self.assertEqual(manual.handle, f"{store.world_id}:manual")
+        self.assertIs(store.resolve_handle(manual.handle), manual)
         self.assertEqual(store.snapshots["initial"].blob_id, manual.blob_id)
         world.tick = 2
         automatic = store.create_if_due(world)
@@ -78,3 +80,5 @@ class PersistenceTests(unittest.TestCase):
             second.open("initial")
         with self.assertRaisesRegex(ValueError, "another world"):
             second.branch("initial", "foreign")
+        with self.assertRaisesRegex(ValueError, "another world"):
+            second.resolve_handle(first.snapshots["initial"].handle)
