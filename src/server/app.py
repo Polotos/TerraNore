@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import mimetypes
+import os
 import socket
 import struct
 import threading
@@ -248,10 +249,23 @@ class AppState:
             task = self.tasks[self.active_task_id]
             if task.status in ("queued", "running", "paused"):
                 active_task = task.dto().to_dict()
+        worker_pids = self.simulation.scheduler.worker_pids
+        process_group_id = os.getpgrp() if os.name != "nt" else os.getpid()
+        if os.name == "nt":
+            try:
+                process_group_id = int(os.environ.get(
+                    "TERRANORE_PROCESS_GROUP_ID", process_group_id
+                ))
+            except ValueError:
+                pass
         return {
             "product": "TerraNore", "saveFormat": FORMAT, "revision": self.revision,
             "readOnly": self.read_only, "branchId": self.branch_id,
             "activeTask": active_task,
+            "diagnostics": {
+                "serverPid": os.getpid(), "workerPids": worker_pids,
+                "actualWorkers": len(worker_pids), "processGroupId": process_group_id,
+            },
             "world": WorldDTO.from_world(world, self.simulation.scheduler.workers).to_dict(),
             "summary": {
                 "year": world.tick // Simulation.TICKS_PER_YEAR,

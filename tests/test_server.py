@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 import unittest
 from urllib.error import HTTPError
@@ -25,6 +26,10 @@ class ServerTests(unittest.TestCase):
         self.assertIn("TerraNore — генератор мира", html)
         state = json.load(urlopen(self.base + "/api/test/v1/state", timeout=2))
         self.assertEqual(state["product"], "TerraNore")
+        diagnostics = state["diagnostics"]
+        self.assertEqual(diagnostics["serverPid"], os.getpid())
+        self.assertEqual(diagnostics["actualWorkers"], len(diagnostics["workerPids"]))
+        self.assertIsInstance(diagnostics["processGroupId"], int)
         request = Request(self.base + "/api/test/v1/tick", data=b'{"ticks":12}', headers={"Content-Type":"application/json"}, method="POST")
         updated = json.load(urlopen(request, timeout=2))
         self.assertEqual(updated["world"]["tick"], 12)

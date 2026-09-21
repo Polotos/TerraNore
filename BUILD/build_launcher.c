@@ -57,14 +57,35 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR ignored, int s
     DWORD executable_length;
     STARTUPINFOW startup = { sizeof(startup) };
     PROCESS_INFORMATION process;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_limits = { 0 };
+    HANDLE job = NULL;
     DWORD code = 1;
     (void)instance; (void)previous; (void)ignored; (void)show;
 
+    job = CreateJobObjectW(NULL, L"TerraNore.Build");
+    if (!job) {
+        MessageBoxW(NULL, L"Не удалось создать Windows Job Object.",
+                    L"TerraNore: ошибка запуска", MB_OK | MB_ICONERROR);
+        return 5;
+    }
+    job_limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+                                 &job_limits, sizeof(job_limits))) {
+        CloseHandle(job);
+        MessageBoxW(NULL, L"Не удалось настроить Windows Job Object.",
+                    L"TerraNore: ошибка запуска", MB_OK | MB_ICONERROR);
+        return 5;
+    }
+
     arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
-    if (!arguments || argument_count < 1) return 2;
+    if (!arguments || argument_count < 1) {
+        CloseHandle(job);
+        return 2;
+    }
     executable_length = GetModuleFileNameW(NULL, executable, 32768);
     if (!executable_length || executable_length >= 32768) {
         LocalFree(arguments);
+        CloseHandle(job);
         return 2;
     }
     slash = executable + lstrlenW(executable);
@@ -72,6 +93,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR ignored, int s
     *slash = L'\0';
     if (lstrlenW(executable) + 9 >= 32768) {
         LocalFree(arguments);
+        CloseHandle(job);
         return 3;
     }
     lstrcpyW(script, executable);
@@ -80,6 +102,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR ignored, int s
     command = (wchar_t *)LocalAlloc(LMEM_FIXED, remaining * sizeof(wchar_t));
     if (!command) {
         LocalFree(arguments);
+        CloseHandle(job);
         return 3;
     }
     cursor = command;
@@ -95,23 +118,48 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR ignored, int s
     *cursor = L'\0';
     LocalFree(arguments);
 
-    if (!CreateProcessW(NULL, command, NULL, NULL, TRUE, 0, NULL, executable,
+    if (!CreateProcessW(NULL, command, NULL, NULL, TRUE,
+                        CREATE_SUSPENDED | CREATE_NEW_PROCESS_GROUP,
+                        NULL, executable,
                         &startup, &process)) {
         LocalFree(command);
+        CloseHandle(job);
         MessageBoxW(NULL, L"Python 3 не найден. Установите Python 3.10 или новее.",
                     L"TerraNore: ошибка сборки", MB_OK | MB_ICONERROR);
         return 4;
     }
     LocalFree(command);
+    if (!AssignProcessToJobObject(job, process.hProcess)) {
+        TerminateProcess(process.hProcess, 5);
+        WaitForSingleObject(process.hProcess, INFINITE);
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+        CloseHandle(job);
+        MessageBoxW(NULL, L"Не удалось добавить процесс сборки в Windows Job Object.",
+                    L"TerraNore: ошибка запуска", MB_OK | MB_ICONERROR);
+        return 5;
+    }
+    if (ResumeThread(process.hThread) == (DWORD)-1) {
+        TerminateProcess(process.hProcess, 6);
+        WaitForSingleObject(process.hProcess, INFINITE);
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+        CloseHandle(job);
+        MessageBoxW(NULL, L"Не удалось возобновить процесс сборки.",
+                    L"TerraNore: ошибка запуска", MB_OK | MB_ICONERROR);
+        return 6;
+    }
     WaitForSingleObject(process.hProcess, INFINITE);
     GetExitCodeProcess(process.hProcess, &code);
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
+    CloseHandle(job);
     return (int)code;
 
 command_too_long:
     LocalFree(command);
     LocalFree(arguments);
+    CloseHandle(job);
     MessageBoxW(NULL, L"Командная строка слишком длинная.",
                 L"TerraNore: ошибка сборки", MB_OK | MB_ICONERROR);
     return 3;
