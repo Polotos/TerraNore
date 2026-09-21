@@ -48,6 +48,76 @@ def write_launchers(destination: Path) -> None:
     launcher.chmod(0o755)
 
 
+def check_staging(staging: Path) -> None:
+    """Reject an incomplete distribution before touching the live output."""
+    required = (
+        staging / "src" / "simulation" / "engine.py",
+        staging / "src" / "ui" / "index.html",
+        staging / "run.cmd",
+        staging / "run.sh",
+        staging / "logs",
+        staging / "saves",
+    )
+    missing = [path.relative_to(staging) for path in required if not path.exists()]
+    if missing:
+        names = ", ".join(str(path) for path in missing)
+        raise BuildFailure(f"проверка staging не пройдена; отсутствуют: {names}")
+
+
+def _rename(source: Path, destination: Path) -> None:
+    """A small seam for testing failures in the publication transaction."""
+    source.replace(destination)
+
+
+def publish(staging: Path, output: Path) -> None:
+    """Publish staging while preserving (and, on failure, restoring) output."""
+    backup = output.with_name(f".{output.name}.backup")
+    had_output = output.exists()
+
+    if backup.exists():
+        raise BuildFailure(
+            f"не удалось начать публикацию: резервный каталог уже существует: {backup}. "
+            "Рабочая сборка не изменена"
+        )
+
+    if had_output:
+        try:
+            _rename(output, backup)
+        except OSError as error:
+            raise BuildFailure(
+                "не удалось переименовать рабочий output в backup. Рабочая сборка "
+                "не удалена; на Windows остановите запущенный из неё сервер и повторите "
+                f"сборку ({error})"
+            ) from error
+
+    try:
+        _rename(staging, output)
+    except OSError as publish_error:
+        if had_output:
+            try:
+                _rename(backup, output)
+            except OSError as restore_error:
+                raise BuildFailure(
+                    "ошибка публикации и автоматического восстановления. Старая сборка "
+                    f"сохранена в {backup}; не удаляйте её ({restore_error})"
+                ) from publish_error
+            raise BuildFailure(
+                "не удалось опубликовать staging; прежний output восстановлен. "
+                "На Windows остановите сервер, который может блокировать файлы, и "
+                f"повторите сборку ({publish_error})"
+            ) from publish_error
+        raise BuildFailure(f"не удалось опубликовать staging: {publish_error}") from publish_error
+
+    if had_output:
+        try:
+            shutil.rmtree(backup)
+        except OSError as error:
+            raise BuildFailure(
+                f"новая сборка опубликована, но резервный каталог {backup} не удалось "
+                f"удалить: {error}"
+            ) from error
+
+
 def build(output: Path, stream) -> Path:
     if sys.version_info < (3, 10):
         raise BuildFailure("требуется Python 3.10 или новее")
@@ -75,9 +145,9 @@ def build(output: Path, stream) -> Path:
         write_launchers(staging)
         (staging / "logs").mkdir()
         (staging / "saves").mkdir()
-        if output.exists():
-            shutil.rmtree(output)
-        staging.replace(output)
+        check_staging(staging)
+        log(f"Staging проверен: {staging}", stream)
+        publish(staging, output)
         log(f"Тестовый дистрибутив готов: {output}", stream)
         return output
     except Exception:
