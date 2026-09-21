@@ -616,7 +616,8 @@ class TestRequestHandler(BaseHTTPRequestHandler):
             points = [
                 ({"tick": point["tick"], metric: point[metric]} if "tick" in point else {
                     "start_tick": point["start_tick"], "end_tick": point["end_tick"],
-                    "count": point["count"], "metrics": {metric: point["metrics"][metric]},
+                    "count": point["count"], metric: point["metrics"][metric]["value"],
+                    "metrics": {metric: point["metrics"][metric]},
                 })
                 for point in points
             ]
