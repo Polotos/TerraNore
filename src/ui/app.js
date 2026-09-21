@@ -159,6 +159,20 @@ function stopTaskPolling() {
   taskPollTimer = null;
 }
 
+async function finalizeTask(task) {
+  // Keep controls locked until the authoritative state includes every tick the
+  // task completed. Terminal task responses can arrive from control endpoints,
+  // not only from the polling loop.
+  setRunning(true);
+  const latest = await request('/state');
+  renderState(latest, true);
+  localStorage.removeItem('terranore.activeTask');
+  setRunning(false);
+  if (task.status === 'completed') toast(`Рассчитано тиков: ${task.completed}`);
+  else if (task.status === 'cancelled') toast('Расчёт отменён');
+  else if (task.status === 'failed') toast(`Расчёт остановлен: ${task.error || 'ошибка сервера'}`);
+}
+
 async function pollTask() {
   if (!run.active || !run.taskId) return;
   try {
@@ -169,12 +183,7 @@ async function pollTask() {
       taskPollTimer = setTimeout(pollTask, 150);
       return;
     }
-    localStorage.removeItem('terranore.activeTask');
-    const latest = await request('/state');
-    renderState(latest, true);
-    if (task.status === 'completed') toast(`Рассчитано тиков: ${task.completed}`);
-    else if (task.status === 'cancelled') toast('Расчёт отменён');
-    else if (task.status === 'failed') toast(`Расчёт остановлен: ${task.error || 'ошибка сервера'}`);
+    await finalizeTask(task);
   } catch (error) {
     stopTaskPolling();
     setRunning(false);
@@ -186,6 +195,10 @@ function trackTask(task) {
   stopTaskPolling();
   rememberTask(task);
   if (run.active) taskPollTimer = setTimeout(pollTask, 0);
+  else finalizeTask(task).catch(error => {
+    setRunning(false);
+    toast(`Не удалось получить состояние задачи: ${error.message}`);
+  });
 }
 
 async function execute(ticks) {
