@@ -47,6 +47,11 @@ class Snapshot:
     reason: str
     created_at: str
 
+    @property
+    def handle(self) -> str:
+        """Return the externally visible, world-scoped snapshot handle."""
+        return f"{self.world_id}:{self.id}"
+
 
 class SnapshotStore:
     """Content-addressed copy-on-write snapshots with explicit branches."""
@@ -92,6 +97,13 @@ class SnapshotStore:
             raise ValueError("snapshot belongs to another world")
         data = self._blobs[snapshot.blob_id]
         return clone_world(_world_from_dict(data))
+
+    def resolve_handle(self, handle: str) -> Snapshot:
+        """Resolve an external handle without accepting an ID from another world."""
+        world_id, separator, snapshot_id = handle.partition(":")
+        if not separator or world_id != self.world_id:
+            raise ValueError("snapshot belongs to another world")
+        return self.snapshots[snapshot_id]
 
     def branch(self, snapshot_id: str, branch_id: str) -> World:
         if not branch_id or branch_id in self.branches:

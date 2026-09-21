@@ -505,28 +505,34 @@ class TestRequestHandler(BaseHTTPRequestHandler):
                 self.app.simulation.world, snapshot_id=str(snapshot_id) if snapshot_id else None,
                 branch_id=self.app.branch_id,
             )
-            return 201, {"revision": self.app.revision, "snapshot": {"id": snapshot.id, "tick": snapshot.tick}}
+            return 201, {"revision": self.app.revision, "snapshot": {"id": snapshot.handle, "tick": snapshot.tick}}
         if path.startswith(f"{API}/snapshots/") and path.endswith("/open"):
-            snapshot_id = path[len(f"{API}/snapshots/"):-len("/open")].strip("/")
-            if snapshot_id not in self.app.snapshot_store.snapshots:
-                raise ApiError(404, "unknown snapshot")
+            handle = path[len(f"{API}/snapshots/"):-len("/open")].strip("/")
             try:
+                snapshot = self.app.snapshot_store.resolve_handle(handle)
+            except KeyError:
+                raise ApiError(404, "unknown snapshot") from None
+            except ValueError as error:
+                raise ApiError(409, str(error)) from None
+            try:
+                snapshot_id = snapshot.id
                 world = self.app.snapshot_store.open(snapshot_id)
             except ValueError as error:
                 raise ApiError(409, str(error)) from None
             self.app.replace_world(
                 world, read_only=True,
-                branch_id=self.app.snapshot_store.snapshots[snapshot_id].branch_id,
+                branch_id=snapshot.branch_id,
                 preserve_snapshot_store=True,
             )
             return 200, self.app.payload()
         if path.startswith(f"{API}/snapshots/") and path.endswith("/branch"):
-            snapshot_id = path[len(f"{API}/snapshots/"):-len("/branch")].strip("/")
-            if snapshot_id not in self.app.snapshot_store.snapshots:
-                raise ApiError(404, "unknown snapshot")
+            handle = path[len(f"{API}/snapshots/"):-len("/branch")].strip("/")
             branch_id = str(data.get("branchId", "")).strip()
             try:
+                snapshot_id = self.app.snapshot_store.resolve_handle(handle).id
                 world = self.app.snapshot_store.branch(snapshot_id, branch_id)
+            except KeyError:
+                raise ApiError(404, "unknown snapshot") from None
             except ValueError as error:
                 raise ApiError(409, str(error)) from None
             self.app.replace_world(world, branch_id=branch_id, preserve_snapshot_store=True)
