@@ -153,8 +153,11 @@ class ServerOperationTests(unittest.TestCase):
 
         self.assertTrue(payload["items"])
         bucket = payload["items"][0]
-        self.assertEqual(set(bucket), {"start_tick", "end_tick", "count", "metrics"})
+        self.assertEqual(
+            set(bucket), {"start_tick", "end_tick", "count", "production", "metrics"}
+        )
         self.assertIn("sum", bucket["metrics"]["production"])
+        self.assertEqual(bucket["production"], bucket["metrics"]["production"]["value"])
 
     def test_snapshots_and_save_load(self):
         snapshot = self.post("/snapshots")["snapshot"]
