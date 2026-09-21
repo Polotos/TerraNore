@@ -110,6 +110,7 @@ def _clone_world(world: World) -> World:
         accuracy_profile=data["accuracy_profile"],
     )
     cloned._legacy_iso_date = "start_date" in data and "-" in data["start_date"]
+    cloned._legacy_start_date = data.get("start_date") if cloned._legacy_iso_date else None
     return cloned
 
 
