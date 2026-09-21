@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from datetime import date
 import re
 from typing import TYPE_CHECKING
 
@@ -44,13 +45,17 @@ class SimulationDate:
             raise ValueError("simulation date must be a string")
         match = cls._PATTERN.fullmatch(value.strip())
         if not match:
-            legacy = re.fullmatch(r"(\d+)-(\d{2})-(\d{2})", value.strip())
-            if legacy:
-                year, month, day_of_month = map(int, legacy.groups())
-                if 1 <= month <= 12 and 1 <= day_of_month <= 30:
-                    quarter, third = divmod(month - 1, 3)
-                    decade, day = divmod(day_of_month - 1, 10)
-                    return cls(year, quarter + 1, third + 1, decade + 1, day + 1)
+            try:
+                legacy = date.fromisoformat(value.strip())
+            except ValueError:
+                legacy = None
+            if legacy is not None:
+                # Legacy saves used Gregorian dates.  Map their month/day
+                # coordinates onto the Imperial calendar and allow a valid
+                # Gregorian 31st to carry into the following Imperial month.
+                ordinal = legacy.year * cls.DAYS_PER_YEAR
+                ordinal += (legacy.month - 1) * 30 + legacy.day - 1
+                return cls.from_ordinal(ordinal)
             raise ValueError("date must have format day.decade\\third.quarter.year")
         day, decade, third, quarter, year = map(int, match.groups())
         return cls(year, quarter, third, decade, day)
@@ -113,10 +118,12 @@ class World:
 
     def __post_init__(self) -> None:
         legacy = isinstance(self.initial_date, str) and "-" in self.initial_date
+        legacy_start_date = self.initial_date if legacy else None
         self.initial_date = SimulationDate.parse(self.initial_date)
         self.current_date = (self.initial_date.add_ticks(self.tick) if self.current_date is None
                              else SimulationDate.parse(self.current_date))
         self._legacy_iso_date = legacy
+        self._legacy_start_date = legacy_start_date
         # LOD nodes are operational domain objects, rather than presentation
         # strings on Region.  Keeping the registry outside the dataclass fields
         # also prevents asdict() from trying to serialise enums and passive
@@ -176,6 +183,7 @@ class World:
             accuracy_profile=accuracy_profile,
         )
         world._legacy_iso_date = "-" in start_date
+        world._legacy_start_date = start_date if world._legacy_iso_date else None
         return world
 
     def to_dict(self) -> dict:
@@ -190,6 +198,8 @@ class World:
     def start_date(self) -> str:
         """Compatibility name for clients of the former Gregorian field."""
         if getattr(self, "_legacy_iso_date", False):
+            if getattr(self, "_legacy_start_date", None) is not None:
+                return self._legacy_start_date
             month = (self.initial_date.quarter - 1) * 3 + self.initial_date.third
             day = (self.initial_date.decade - 1) * 10 + self.initial_date.day
             return f"{self.initial_date.year:04d}-{month:02d}-{day:02d}"
@@ -200,3 +210,4 @@ class World:
         self.initial_date = SimulationDate.parse(value)
         self.current_date = self.initial_date.add_ticks(self.tick)
         self._legacy_iso_date = "-" in value
+        self._legacy_start_date = value if self._legacy_iso_date else None

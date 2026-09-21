@@ -32,6 +32,25 @@ class SimulationDateTests(unittest.TestCase):
         self.assertEqual(payload["world"]["current_date"], "01.1\\3.1.4300")
         self.assertEqual(restored.current_date, simulation.world.current_date)
 
+    def test_legacy_snapshots_accept_and_preserve_gregorian_31st(self):
+        for legacy_date, imperial_date in (
+            ("2024-01-31", "01.1\\2.1.2024"),
+            ("2024-12-31", "01.1\\1.1.2025"),
+        ):
+            with self.subTest(legacy_date=legacy_date), tempfile.TemporaryDirectory() as directory:
+                world_data = World.create().to_dict()
+                world_data.pop("initial_date")
+                world_data.pop("current_date")
+                world_data["start_date"] = legacy_date
+                path = Path(directory) / "legacy.json"
+                path.write_text(json.dumps({"format": "test-save-v1", "world": world_data}),
+                                encoding="utf-8")
+
+                restored = load_snapshot(path)
+
+                self.assertEqual(restored.start_date, legacy_date)
+                self.assertEqual(str(restored.initial_date), imperial_date)
+
 
 class TargetDateTests(unittest.TestCase):
     def setUp(self):

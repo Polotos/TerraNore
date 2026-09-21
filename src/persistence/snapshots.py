@@ -28,6 +28,7 @@ def _world_from_dict(data: dict) -> World:
                  current_date=SimulationDate.parse(current) if current else None,
                  **configuration)
     world._legacy_iso_date = "start_date" in data and "-" in data["start_date"]
+    world._legacy_start_date = data.get("start_date") if world._legacy_iso_date else None
     return world
 
 
