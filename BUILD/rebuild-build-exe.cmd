@@ -9,7 +9,7 @@ if errorlevel 1 (
   popd
   exit /b 2
 )
-x86_64-w64-mingw32-gcc -Os -s -municode -mconsole build_launcher.c -Wl,--no-insert-timestamp -o build.exe
+x86_64-w64-mingw32-gcc -Os -s -municode -mconsole build_launcher.c -lshell32 -Wl,--no-insert-timestamp -o build.exe
 set result=%errorlevel%
 if not "%result%"=="0" echo ERROR: build.exe compilation failed. 1>&2
 popd
