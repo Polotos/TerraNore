@@ -99,9 +99,9 @@ $('#worldForm').addEventListener('submit', async event => {
       accuracyProfile:$('#accuracy').value,
       workers:$('#workers').value === 'auto' ? 'auto' : Number($('#workers').value)
     }) });
-    renderState(data, true); toast('Тестовый мир создан'); switchView('simulation');
+    renderState(data, true); toast('Мир сгенерирован'); switchView('simulation');
   } catch (error) { toast(`Ошибка: ${error.message}`); }
-  finally { button.disabled = false; button.innerHTML = '<span>＋</span> Создать тестовый мир'; }
+  finally { button.disabled = false; button.innerHTML = '<span>＋</span> Сгенерировать мир'; }
 });
 
 $$('.period-grid button').forEach(button => button.addEventListener('click', () => {
@@ -354,7 +354,8 @@ function updateLodAvailability(busy = false) {
 function renderObjectCard(object) {
   setText('#objectName', object.name || object.id);
   setText('#objectType', String(object.type || 'object').toUpperCase());
-  setText('#objectPath', `WORLD / ${String(object.type || 'OBJECT').toUpperCase()} / ${object.id.toUpperCase()}`);
+  const path = [object.systemName, object.planetName, object.name || object.id].filter(Boolean);
+  setText('#objectPath', path.join(' / '));
   setText('#objectPopulation', object.population == null ? '—' : fmt.format(object.population));
   setText('#objectTreasury', object.economy?.treasury == null ? '—' : `${fmt.format(object.economy.treasury)} TN`);
   const manualLod = object.manualLod || object.detailLevel || 'auto';

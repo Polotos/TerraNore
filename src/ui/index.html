@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TerraNore — тестовая сборка</title>
+  <title>TerraNore — генератор мира</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <span hidden>TerraNore Test</span>
+  <span hidden>TerraNore</span>
   <header class="topbar">
-    <a class="brand" href="#create" aria-label="TerraNore — тестовая сборка"><span class="brand-mark">TN</span><span><strong>TerraNore</strong><small>ТЕСТОВАЯ СБОРКА</small></span></a>
+    <a class="brand" href="#create" aria-label="TerraNore — генератор мира"><span class="brand-mark">TN</span><span><strong>TerraNore</strong><small>ГЕНЕРАТОР МИРА</small></span></a>
     <nav aria-label="Основная навигация">
       <button class="nav-item active" data-view="create"><span>01</span> Создание мира</button>
       <button class="nav-item" data-view="simulation"><span>02</span> Симуляция</button>
@@ -21,7 +21,7 @@
   <main>
     <section id="create" class="view active" aria-labelledby="create-title">
       <div class="page-heading">
-        <div><p class="eyebrow">ИНИЦИАЛИЗАЦИЯ / 01</p><h1 id="create-title">Создание тестового мира</h1><p>Настройте начальные условия детерминированной симуляции.</p></div>
+        <div><p class="eyebrow">ГЕНЕРАЦИЯ / 01</p><h1 id="create-title">Генерация мира</h1><p>Настройте начальные условия детерминированной симуляции.</p></div>
         <div class="build-stamp">ALGORITHM <b>TN-SIM 0.1.0</b></div>
       </div>
       <form id="worldForm" class="create-grid">
@@ -35,7 +35,7 @@
         <div class="form-card"><label for="startDate">НАЧАЛЬНАЯ ДАТА</label><input id="startDate" type="text" value="01.1\1.1.4300" pattern="[0-9]{1,2}\.[1-3]\\[1-3]\.[1-4]\.[0-9]+" title="день.декада\треть.квартал.год" required></div>
         <div class="form-card"><label for="accuracy">ПРОФИЛЬ ТОЧНОСТИ</label><select id="accuracy"><option value="fast">Быстрый</option><option value="balanced" selected>Сбалансированный</option><option value="research">Исследовательский</option></select></div>
         <div class="form-card"><label for="workers">РАБОЧИЕ ПОТОКИ</label><select id="workers"><option value="auto" selected>Автоматически</option><option>1</option><option>2</option><option>4</option><option>8</option></select><small id="cpuHint">Определяется системой</small></div>
-        <div class="create-submit wide"><div><span>ОЦЕНКА МИРА</span><b id="worldEstimate">≈ 4 480 объектов</b></div><button class="primary large" type="submit"><span>＋</span> Создать тестовый мир</button></div>
+        <div class="create-submit wide"><div><span>ОЦЕНКА МИРА</span><b id="worldEstimate">≈ 4 480 объектов</b></div><button class="primary large" type="submit"><span>＋</span> Сгенерировать мир</button></div>
       </form>
     </section>
 
@@ -90,7 +90,7 @@
       </div>
     </section>
   </main>
-  <footer><span>TerraNore — тестовая сборка</span><span>ALGORITHM <b>TN-SIM 0.1.0</b></span><span>SAVE FORMAT <b id="saveFormat">test-save-v1</b></span><span>SEED <b id="footerSeed">42</b></span></footer>
+  <footer><span>TerraNore — генератор мира</span><span>ALGORITHM <b>TN-SIM 0.1.0</b></span><span>SAVE FORMAT <b id="saveFormat">test-save-v1</b></span><span>SEED <b id="footerSeed">42</b></span></footer>
   <div id="toast" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
 </body>
