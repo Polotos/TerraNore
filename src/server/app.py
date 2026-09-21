@@ -249,7 +249,7 @@ class AppState:
             if task.status in ("queued", "running", "paused"):
                 active_task = task.dto().to_dict()
         return {
-            "product": "TerraNore Test", "saveFormat": FORMAT, "revision": self.revision,
+            "product": "TerraNore", "saveFormat": FORMAT, "revision": self.revision,
             "readOnly": self.read_only, "branchId": self.branch_id,
             "activeTask": active_task,
             "world": WorldDTO.from_world(world, self.simulation.scheduler.workers).to_dict(),
@@ -582,6 +582,8 @@ class TestRequestHandler(BaseHTTPRequestHandler):
         effective_lod = f"lod-{int(node.effective_lod())}"
         return {
             "id": region.id, "type": "region", "name": region.name,
+            "systemId": region.system_id, "systemName": region.system_name,
+            "planetId": region.planet_id, "planetName": region.planet_name,
             "population": region.population, "resources": region.resources,
             # Keep detailLevel as the backwards-compatible manual selection.
             "detailLevel": manual_lod, "manualLod": manual_lod,

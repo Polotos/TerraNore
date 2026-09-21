@@ -22,9 +22,9 @@ class ServerTests(unittest.TestCase):
 
     def test_ui_and_api(self):
         html = urlopen(self.base + "/", timeout=2).read().decode()
-        self.assertIn("TerraNore Test", html)
+        self.assertIn("TerraNore — генератор мира", html)
         state = json.load(urlopen(self.base + "/api/test/v1/state", timeout=2))
-        self.assertEqual(state["product"], "TerraNore Test")
+        self.assertEqual(state["product"], "TerraNore")
         request = Request(self.base + "/api/test/v1/tick", data=b'{"ticks":12}', headers={"Content-Type":"application/json"}, method="POST")
         updated = json.load(urlopen(request, timeout=2))
         self.assertEqual(updated["world"]["tick"], 12)

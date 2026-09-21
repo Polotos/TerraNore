@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import date
+import hashlib
 import re
 from typing import TYPE_CHECKING
 
@@ -94,6 +95,21 @@ class Economy:
     price_index: float = 1.0
 
 
+def object_code(seed: int, kind: str, index: int) -> str:
+    """Return a stable, type-specific hexadecimal display code.
+
+    These codes deliberately are not the public object IDs: IDs remain stable
+    for API and save compatibility, while generated worlds no longer receive
+    placeholder human names.
+    """
+    prefixes = {"system": "SYS", "planet": "PLN", "region": "REG"}
+    if kind not in prefixes or index < 0:
+        raise ValueError("unknown object code kind or negative index")
+    source = f"TerraNore:{kind}:{seed}:{index}".encode("utf-8")
+    value = hashlib.blake2s(source, digest_size=4).hexdigest().upper()
+    return f"{prefixes[kind]}-{value}"
+
+
 @dataclass
 class Region:
     id: str
@@ -103,6 +119,9 @@ class Region:
     economy: Economy = field(default_factory=Economy)
     detail_level: str = "summary"
     system_id: str = "system-1"
+    system_name: str = "SYS-00000000"
+    planet_id: str = "planet-1"
+    planet_name: str = "PLN-00000000"
 
 
 @dataclass
@@ -166,14 +185,16 @@ class World:
         if system_count < 1 or settlement_count < 1:
             raise ValueError("world dimensions must be positive")
         initial_date = SimulationDate.parse(start_date)
-        names = ("North Reach", "Amber Coast", "Verdant Basin", "Iron Vale")
         regions = [
             Region(
                 f"region-{i + 1}",
-                names[i] if i < len(names) else f"Settlement {i + 1}",
+                object_code(seed, "region", i),
                 80_000 + ((seed * 7919 + i * 17389) % 70_000),
                 900 + (i % system_count) * 140,
                 system_id=f"system-{i % system_count + 1}",
+                system_name=object_code(seed, "system", i % system_count),
+                planet_id=f"planet-{i + 1}",
+                planet_name=object_code(seed, "planet", i),
             )
             for i in range(settlement_count)
         ]

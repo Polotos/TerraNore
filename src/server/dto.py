@@ -24,6 +24,10 @@ class RegionDTO:
     resources: float
     economy: EconomyDTO
     detail_level: str
+    system_id: str
+    system_name: str
+    planet_id: str
+    planet_name: str
 
 
 @dataclass(frozen=True)
@@ -62,6 +66,10 @@ class WorldDTO:
                         region.economy.price_index,
                     ),
                     external_lod(world.simulation_node(region.id)),
+                    region.system_id,
+                    region.system_name,
+                    region.planet_id,
+                    region.planet_name,
                 )
                 for region in world.regions
             ),
@@ -76,6 +84,13 @@ class WorldDTO:
             ("current_date", "currentDate"),
         ):
             result[camel] = result.pop(snake)
+        for region in result["regions"]:
+            for snake, camel in (
+                ("detail_level", "detailLevel"), ("system_id", "systemId"),
+                ("system_name", "systemName"), ("planet_id", "planetId"),
+                ("planet_name", "planetName"),
+            ):
+                region[camel] = region[snake]
         return result
 
 
